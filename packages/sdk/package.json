@@ -1,0 +1,48 @@
+{
+  "name": "@socialgo/sdk",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SocialGOcompany/socialgo-tools.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://github.com/SocialGOcompany/socialgo-tools/tree/main/packages/sdk#readme",
+  "bugs": "https://github.com/SocialGOcompany/socialgo-tools/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "version": "0.1.0",
+  "description": "TypeScript SDK for the SocialGO SMM API v2 — typed client, models and pricing helpers.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  },
+  "keywords": [
+    "socialgo",
+    "smm",
+    "smm-api",
+    "smm-panel",
+    "social-media-marketing",
+    "sdk",
+    "typescript"
+  ]
+}

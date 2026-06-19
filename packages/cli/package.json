@@ -1,0 +1,50 @@
+{
+  "name": "@socialgo/cli",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SocialGOcompany/socialgo-tools.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/SocialGOcompany/socialgo-tools/tree/main/packages/cli#readme",
+  "bugs": "https://github.com/SocialGOcompany/socialgo-tools/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "version": "0.1.0",
+  "description": "Command-line client for SocialGO — browse services, place & track orders, manage balance, all from your terminal.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "socialgo": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "@socialgo/sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  },
+  "keywords": [
+    "socialgo",
+    "smm",
+    "smm-panel",
+    "cli",
+    "social-media-marketing",
+    "instagram",
+    "tiktok",
+    "terminal"
+  ]
+}

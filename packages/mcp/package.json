@@ -1,0 +1,51 @@
+{
+  "name": "@socialgo/mcp",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SocialGOcompany/socialgo-tools.git",
+    "directory": "packages/mcp"
+  },
+  "homepage": "https://github.com/SocialGOcompany/socialgo-tools/tree/main/packages/mcp#readme",
+  "bugs": "https://github.com/SocialGOcompany/socialgo-tools/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "version": "0.1.0",
+  "description": "Model Context Protocol server for SocialGO — lets AI assistants (Claude, etc.) search services and place SMM orders.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "socialgo-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1",
+    "@socialgo/sdk": "workspace:*",
+    "zod": "^3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "keywords": [
+    "socialgo",
+    "smm",
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "claude",
+    "llm-tools",
+    "social-media-marketing"
+  ]
+}

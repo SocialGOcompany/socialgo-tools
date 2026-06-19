@@ -1,0 +1,13 @@
+{
+  "_comment": "Example MCP client config for the SocialGO MCP server. Drop the `socialgo` entry into your MCP-capable client's config (e.g. Claude Desktop's claude_desktop_config.json, under `mcpServers`). Replace the env values with your own. SOCIALGO_API_KEY is required for catalog/reseller tools; the guest tools (socialgo_guest_order, socialgo_guest_order_status) work without it but the server still reads it for the other tools. NEVER commit a real API key.",
+  "mcpServers": {
+    "socialgo": {
+      "command": "npx",
+      "args": ["-y", "@socialgo/mcp"],
+      "env": {
+        "SOCIALGO_API_URL": "https://usesocialgo.com",
+        "SOCIALGO_API_KEY": "your-api-key-here"
+      }
+    }
+  }
+}
