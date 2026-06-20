@@ -648,7 +648,10 @@ program
   .command("add-funds")
   .description("cria um pagamento pendente para recarregar a carteira (conclui no painel)")
   .requiredOption("--amount <valor>", "valor a adicionar", (v) => parseFloat(v))
-  .requiredOption("--method <metodo>", "método: mercadopago | stripe | crypto | manual")
+  .requiredOption(
+    "--method <metodo>",
+    "gateway de pagamento ativo (veja 'socialgo guest-gateways') ou 'manual'",
+  )
   .action(async (opts: { amount: number; method: string }) => {
     try {
       if (!Number.isFinite(opts.amount) || opts.amount <= 0) {
@@ -694,7 +697,33 @@ admin
 // é o mesmo, mas a chamada de guest nunca envia Authorization. A base é a mesma
 // (--api-url / SOCIALGO_API_URL) — aponte para o host onde a API roda.
 
-const GUEST_METHODS: readonly GuestCheckoutMethod[] = ["mercadopago", "stripe", "crypto"];
+// Os métodos de pagamento NÃO são hardcoded: a fonte da verdade é o painel
+// (GET /gateways/active, via client.guestPaymentMethods()). O fallback mínimo
+// seguro (FALLBACK_GUEST_METHODS) só entra dentro do client quando a consulta
+// falha — a CLI nunca depende de uma lista fixa aqui.
+
+program
+  .command("guest-gateways")
+  .description("métodos de pagamento ATIVOS do painel (consulta /gateways/active)")
+  .action(async () => {
+    try {
+      const gateways = await getClient().guestActiveGateways();
+      if (shouldJson()) return printJson(gateways);
+      if (gateways.length === 0) {
+        out(c.yellow("Nenhum gateway ativo no painel no momento."));
+        return;
+      }
+      out(c.bold("Métodos de pagamento ativos (use o valor de 'method' no guest-order):"));
+      out();
+      for (const g of gateways) {
+        const coins = g.coins?.length ? c.dim(` — moedas: ${g.coins.join(", ")}`) : "";
+        const notice = g.notice ? c.dim(`\n      ⚠ ${g.notice}`) : "";
+        out(`  ${c.cyan(g.gateway)}  ${c.bold(g.label)} ${c.dim(`(${g.kind})`)}${coins}${notice}`);
+      }
+    } catch (err) {
+      handleError(err);
+    }
+  });
 
 program
   .command("guest-services")
@@ -722,7 +751,10 @@ program
   .requiredOption("--email <email>", "e-mail do comprador (para rastrear o pedido)")
   .requiredOption("--link <url>", "link de destino (perfil/post/vídeo)")
   .option("--quantity <n>", "quantidade (opcional p/ tipos de lista)", (v) => parseInt(v, 10))
-  .option("--method <metodo>", "mercadopago (PIX/cartão) | stripe (cartão) | crypto", "mercadopago")
+  .option(
+    "--method <metodo>",
+    "gateway de pagamento ATIVO (veja 'socialgo guest-gateways'). Default: 1º ativo do painel.",
+  )
   .option("--comments <txt|arquivo>", "Custom Comments: 1 comentário por linha (texto ou arquivo)")
   .option("--usernames <txt|arquivo>", "Mentions Custom List / with Hashtags: 1 @usuário por linha")
   .option("--hashtags <txt|arquivo>", "Mentions with Hashtags: hashtags (1 por linha)")
@@ -737,7 +769,7 @@ program
         email: string;
         link: string;
         quantity?: number;
-        method: string;
+        method?: string;
         comments?: string;
         usernames?: string;
         hashtags?: string;
@@ -748,9 +780,20 @@ program
       },
     ) => {
       try {
-        const method = opts.method as GuestCheckoutMethod;
-        if (!GUEST_METHODS.includes(method)) {
-          fail(`--method inválido: "${opts.method}". Use: ${GUEST_METHODS.join(" | ")}.`);
+        const client = getClient();
+        // Métodos válidos = gateways REALMENTE ativos no painel (não hardcoded).
+        // Se a consulta falhar, cai no fallback mínimo seguro.
+        const validMethods = await client.guestPaymentMethods();
+        if (validMethods.length === 0) {
+          fail("Nenhum método de pagamento ativo no painel no momento.");
+        }
+        // Sem --method: usa o 1º gateway ativo do painel como padrão.
+        const method = (opts.method ?? validMethods[0]) as GuestCheckoutMethod;
+        if (!validMethods.includes(method)) {
+          fail(
+            `--method inválido: "${opts.method}". Métodos ativos: ${validMethods.join(" | ")}. ` +
+              `(veja 'socialgo guest-gateways')`,
+          );
         }
         if (opts.quantity !== undefined && (!Number.isFinite(opts.quantity) || opts.quantity <= 0)) {
           fail("--quantity precisa ser um número inteiro positivo.");
@@ -765,7 +808,7 @@ program
         if (opts.media !== undefined) metadata.media = opts.media;
         if (opts.answerNumber !== undefined) metadata.answer_number = opts.answerNumber;
 
-        const result = await getClient().guestCreateOrder({
+        const result = await client.guestCreateOrder({
           email: opts.email,
           serviceId,
           link: opts.link,

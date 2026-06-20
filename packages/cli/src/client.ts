@@ -124,8 +124,44 @@ export interface SocialGoClientOptions {
 
 // ---- Guest checkout (endpoints PÚBLICOS, sem chave) ------------------------
 
-/** Métodos de checkout aceitos pela rota pública de guest (= CheckoutGateway). */
-export type GuestCheckoutMethod = "stripe" | "mercadopago" | "crypto" | "paypal" | "paytm";
+/**
+ * Método de checkout do guest (= `gateway` canônico do painel). NÃO é uma união
+ * fixa: a lista REAL de métodos válidos é a que o painel devolve em
+ * `GET /gateways/active` (campo `gateway`). O tipo é string aberta para refletir
+ * que novos gateways podem ser habilitados no painel sem mudar o código.
+ */
+export type GuestCheckoutMethod = string;
+
+/**
+ * Fallback mínimo e seguro de métodos de guest checkout, usado SÓ quando
+ * `GET /gateways/active` falha (rede/painel fora). Não é a fonte da verdade —
+ * é só um piso para o usuário não ficar travado.
+ */
+export const FALLBACK_GUEST_METHODS: readonly string[] = ["mercadopago", "stripe", "crypto"];
+
+/**
+ * Gateway ATIVO devolvido por `GET /gateways/active`. O painel já normaliza
+ * para `{ gateway, label, kind, coins, notice }` (campos NÃO-secretos de UI).
+ * O valor enviado de volta no checkout (`method`) é `gateway`.
+ */
+export interface ActiveGateway {
+  /** Nome canônico — é o valor de `method` no guest checkout. */
+  gateway: string;
+  /** Rótulo amigável para exibição. */
+  label: string;
+  /** Agrupamento de UI (card | crypto | wallet). */
+  kind: "card" | "crypto" | "wallet" | string;
+  /** Moedas aceitas (cripto) — array (vazio p/ não-cripto). */
+  coins: string[];
+  /** Aviso/observação regional (ex.: não aceita cartão de tal país). */
+  notice?: string;
+}
+
+/** Resposta de `GET /gateways/active` ({ gateways, bonusTiers }). */
+export interface ActiveGatewaysResult {
+  gateways: ActiveGateway[];
+  bonusTiers?: unknown[];
+}
 
 /** Item do catálogo público (`GET /guest/services`). */
 export interface GuestService {
@@ -467,9 +503,36 @@ export class SocialGoClient {
   }
 
   /**
+   * Gateways de pagamento REALMENTE ativos no painel (`GET /gateways/active`).
+   * É a fonte da verdade dos métodos de guest checkout: o seletor de pagamento
+   * deve oferecer SÓ os `gateway` retornados aqui (nunca uma lista fixa).
+   * O painel já normaliza para `{ gateway, label, kind, coins, notice }`.
+   */
+  async guestActiveGateways(): Promise<ActiveGateway[]> {
+    const res = await this.guestRequest<ActiveGatewaysResult>("/gateways/active");
+    return Array.isArray(res?.gateways) ? res.gateways : [];
+  }
+
+  /**
+   * Lista os métodos de guest checkout VÁLIDOS (campo `gateway` dos ativos).
+   * Se a consulta falhar (rede/painel fora), cai no fallback mínimo seguro
+   * para não travar o usuário — a UI/validação nunca deve depender de hardcode.
+   */
+  async guestPaymentMethods(): Promise<string[]> {
+    try {
+      const gateways = await this.guestActiveGateways();
+      const methods = gateways.map((g) => g.gateway).filter(Boolean);
+      return methods.length > 0 ? methods : [...FALLBACK_GUEST_METHODS];
+    } catch {
+      return [...FALLBACK_GUEST_METHODS];
+    }
+  }
+
+  /**
    * Cria um pedido pay-per-order (`POST /guest/order`). Sem login: devolve
    * `{ orderId, guestToken, url, amount, currency }`. O usuário abre `url` para
-   * pagar (cartão/PIX via mercadopago, cartão via stripe, ou cripto).
+   * pagar no gateway escolhido. `input.method` precisa ser um `gateway` ATIVO
+   * (ver `guestPaymentMethods()` / `GET /gateways/active`) — não há lista fixa.
    */
   guestCreateOrder(input: GuestOrderInput): Promise<GuestOrderResult> {
     const body: Record<string, unknown> = {

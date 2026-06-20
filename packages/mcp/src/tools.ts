@@ -178,6 +178,68 @@ async function guest<T = unknown>(
   return data as T;
 }
 
+// ── Gateways de pagamento ativos (fonte da verdade do guest checkout) ─────────
+
+/**
+ * Gateway ATIVO devolvido por `GET /gateways/active`. O painel já normaliza
+ * para `{ gateway, label, kind, coins, notice }` (campos NÃO-secretos). O valor
+ * enviado de volta no checkout (`method`) é `gateway`.
+ */
+interface ActiveGateway {
+  gateway: string;
+  label: string;
+  kind: string;
+  coins: string[];
+  notice?: string;
+}
+
+/**
+ * Fallback mínimo e seguro de métodos de guest checkout. Usado SÓ quando
+ * `GET /gateways/active` falha (rede/painel fora) — não é a fonte da verdade,
+ * é só um piso para a tool não travar. A lista REAL vem sempre do painel.
+ */
+const FALLBACK_GUEST_METHODS: readonly string[] = ["mercadopago", "stripe", "crypto"];
+
+/**
+ * Consulta os gateways REALMENTE ativos no painel (`GET /gateways/active`).
+ * É a fonte da verdade dos métodos de guest checkout — o seletor deve oferecer
+ * só estes `gateway`, nunca uma lista fixa. Não lança: em falha, devolve [].
+ */
+async function fetchActiveGateways(): Promise<ActiveGateway[]> {
+  try {
+    const res = await guest<{ gateways?: ActiveGateway[] }>("GET", "/gateways/active");
+    return Array.isArray(res?.gateways) ? res.gateways : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Nomes (`gateway`) dos métodos de pagamento válidos. Cai no fallback mínimo
+ * seguro só se o painel não responder/estiver sem gateways ativos.
+ */
+async function activeGatewayMethods(): Promise<string[]> {
+  const gateways = await fetchActiveGateways();
+  const methods = gateways.map((g) => g.gateway).filter(Boolean);
+  return methods.length > 0 ? methods : [...FALLBACK_GUEST_METHODS];
+}
+
+/**
+ * Monta uma frase humana descrevendo os métodos ativos (para a descrição da
+ * tool de compra). Ex.: "mercadopago (PIX + cartão + boleto), stripe (Cartão)".
+ */
+function describeActiveGateways(gateways: ActiveGateway[]): string {
+  if (gateways.length === 0) {
+    return `(painel não respondeu /gateways/active — fallback: ${FALLBACK_GUEST_METHODS.join(", ")})`;
+  }
+  return gateways
+    .map((g) => {
+      const extra = g.coins?.length ? ` — moedas: ${g.coins.slice(0, 6).join(", ")}` : "";
+      return `${g.gateway} (${g.label}${extra})`;
+    })
+    .join("; ");
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Resultado padrão de uma tool MCP (texto). */
@@ -241,7 +303,14 @@ function filterServices(
 
 // ── Registro das tools ─────────────────────────────────────────────────────────
 
-export function registerTools(server: McpServer): void {
+export async function registerTools(server: McpServer): Promise<void> {
+  // Snapshot dos gateways ativos no boot, só para DESCREVER dinamicamente a tool
+  // de compra (a descrição é montada uma vez no registro). A VALIDAÇÃO em runtime
+  // reconsulta o painel a cada chamada — então mesmo que isto fique velho, a
+  // compra usa sempre a lista fresca. Best-effort: não trava o boot se falhar.
+  const bootGateways = await fetchActiveGateways();
+  const bootMethodsLabel = describeActiveGateways(bootGateways);
+
   /* ───────────────────────── 1) socialgo_balance ──────────────────────────── */
   server.tool(
     "socialgo_balance",
@@ -536,8 +605,10 @@ export function registerTools(server: McpServer): void {
       "Fluxo para conduzir a compra com o usuário:\n" +
       "1. Use socialgo_services para achar o `serviceId` (use o id do serviço do painel).\n" +
       "2. Peça ao usuário o e-mail (para rastreio/recibo), o `link` (perfil/post/vídeo alvo) e a `quantity`.\n" +
-      "3. Pergunte o método de pagamento (`method`): mercadopago oferece PIX + cartão + boleto; " +
-      "stripe cartão; crypto/paypal/paytm conforme habilitados no painel.\n" +
+      "3. Escolha o método de pagamento (`method`). Os métodos REALMENTE ativos no painel agora são: " +
+      bootMethodsLabel +
+      ". NÃO afirme que aceita métodos fora dessa lista — chame socialgo_guest_gateways para a lista fresca " +
+      "e ofereça SÓ esses ao usuário.\n" +
       "4. Chame esta tool. Ela devolve `{ orderId, guestToken, url, amount, currency }`. " +
       "ENTREGUE a `url` ao usuário e diga para abrir e concluir o pagamento — o pedido só é enviado " +
       "ao fornecedor APÓS o pagamento confirmar. GUARDE `orderId` + `guestToken` para acompanhar via " +
@@ -561,8 +632,12 @@ export function registerTools(server: McpServer): void {
         .optional()
         .describe("Quantidade desejada, dentro de min/max do serviço. Para tipos com lista (comments/usernames) é derivada das linhas em metadata."),
       method: z
-        .enum(["stripe", "mercadopago", "crypto", "paypal", "paytm"])
-        .describe("Método de pagamento. 'mercadopago' = PIX + cartão + boleto; 'stripe' = cartão; 'crypto'/'paypal'/'paytm' conforme habilitados. Só métodos ativos no painel funcionam."),
+        .string()
+        .optional()
+        .describe(
+          "Gateway de pagamento ATIVO no painel (campo `gateway` de socialgo_guest_gateways / GET /gateways/active). " +
+            "NÃO é uma lista fixa — use só os ativos. Se omitido, usa o 1º gateway ativo do painel.",
+        ),
       metadata: z
         .record(z.unknown())
         .optional()
@@ -570,16 +645,61 @@ export function registerTools(server: McpServer): void {
     },
     async ({ email, serviceId, link, quantity, method, metadata }) => {
       try {
+        // Fonte da verdade dos métodos: gateways ATIVOS do painel (reconsultado
+        // a cada compra). Sem `method` → usa o 1º ativo. Valida contra a lista
+        // fresca; só cai em fallback mínimo se o painel não responder.
+        const validMethods = await activeGatewayMethods();
+        const chosen = method ?? validMethods[0];
+        if (!chosen) {
+          return fail(new Error("Nenhum método de pagamento ativo no painel no momento."));
+        }
+        if (!validMethods.includes(chosen)) {
+          return fail(
+            new Error(
+              `Método "${chosen}" não está ativo no painel. Métodos ativos: ${validMethods.join(", ")}. ` +
+                `Use socialgo_guest_gateways para conferir e ofereça só esses.`,
+            ),
+          );
+        }
         return ok(
           await guest("POST", "/guest/order", {
             email,
             serviceId,
             link,
             quantity,
-            method,
+            method: chosen,
             metadata,
           }),
         );
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ─────────────────── 10b) socialgo_guest_gateways ────────────────────────── */
+  // Lista os métodos de pagamento REALMENTE ativos no painel (GET /gateways/active).
+  // É o que o modelo deve consultar para oferecer SÓ os métodos válidos no guest
+  // checkout — nunca uma lista fixa. Não usa API key (rota pública).
+  server.tool(
+    "socialgo_guest_gateways",
+    "Lista os métodos de pagamento ATUALMENTE ativos no painel para o guest checkout (pay-per-order). " +
+      "Retorna `{ gateways: [{ gateway, label, kind, coins, notice }] }`, onde `gateway` é o valor a passar " +
+      "como `method` em socialgo_guest_order. Consulte ANTES de oferecer formas de pagamento: ofereça SÓ os " +
+      "métodos retornados aqui — não afirme aceitar gateways que não estão na lista. Sem conta/sem API key.",
+    {},
+    async () => {
+      try {
+        const gateways = await fetchActiveGateways();
+        if (gateways.length === 0) {
+          return ok({
+            gateways: [],
+            note:
+              "Painel não respondeu /gateways/active. Fallback mínimo seguro: " +
+              FALLBACK_GUEST_METHODS.join(", "),
+          });
+        }
+        return ok({ gateways });
       } catch (err) {
         return fail(err);
       }

@@ -21,7 +21,7 @@ async function main(): Promise<void> {
     version: "0.1.0",
   });
 
-  registerTools(server);
+  await registerTools(server);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
