@@ -149,6 +149,15 @@ The reseller endpoint supports the following actions.
 | [`balance`](#action-balance) | Current account balance | `{ balance, currency }` |
 | [`wallet`](#action-wallet) | Balance + recent transactions *(extension)* | wallet object |
 | [`add_funds`](#action-add_funds) | Create a pending top-up payment *(extension)* | payment object |
+| [`mass_order`](#action-mass_order) | Place many orders in one call *(extension)* | `{ orders, errors }` |
+| [`subscription_create`](#action-subscription_create) | Create a recurring subscription *(extension)* | subscription object |
+| [`subscriptions`](#action-subscriptions) | List recurring subscriptions *(extension)* | subscription list |
+| [`coupon_validate`](#action-coupon_validate) | Preview a coupon without redeeming *(extension)* | coupon preview |
+| [`affiliate_stats`](#action-affiliate_stats) | The user's affiliate numbers *(extension)* | affiliate object |
+| [`loyalty_status`](#action-loyalty_status) | The user's loyalty tier *(extension)* | loyalty object |
+| [`recommend`](#action-recommend) | Recommend related services *(extension)* | recommended list |
+| [`campaign_build`](#action-campaign_build) | Build a campaign plan, no order *(extension)* | campaign plan |
+| [`storefront`](#action-storefront) | Resolve a public storefront by slug *(extension)* | store object |
 | [`sync`](#action-sync) | Re-import the catalog *(admin)* | `{ imported, suppliers? }` |
 
 Actions marked *(extension)* are SocialGO additions on top of the base SMM v2 spec.
@@ -590,6 +599,230 @@ curl -s https://usesocialgo.com/api/v2 \
   -d amount=20 \
   -d method=stripe
 ```
+
+---
+
+#### Action: `mass_order`
+
+> **SocialGO extension.**
+
+Place **several** orders in a single call. `orders` is a CSV with one
+`service|link|quantity` per line. Each line is independent — a failing line does
+**not** cancel the others.
+
+**Parameters**
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `key` | yes | Your API key. |
+| `action` | yes | `mass_order` |
+| `orders` | yes | CSV, one `service|link|quantity` per line. |
+
+**Returns**
+
+```json
+{
+  "orders": [{ "line": 1, "order": 98765 }],
+  "errors": [{ "line": 2, "reason": "service not found" }]
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `orders` | array | Created orders, each `{ line, order }`. |
+| `errors` | array | Failed lines, each `{ line, reason }`. |
+
+---
+
+#### Action: `subscription_create`
+
+> **SocialGO extension.**
+
+Create a **recurring** subscription that re-orders a service on a fixed cadence.
+
+**Parameters**
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `key` | yes | Your API key. |
+| `action` | yes | `subscription_create` |
+| `service` | yes | Service id. |
+| `link` | yes | Target link. |
+| `quantity` | yes | Quantity per run. |
+| `runs` | yes | Total number of runs. |
+| `interval` | yes | Interval between runs, in **minutes**. |
+
+**Returns**
+
+```json
+{
+  "subscription": "sub_abc123",
+  "status": "active",
+  "runs": 30,
+  "remaining_runs": 30,
+  "interval": 1440,
+  "next_run": "2026-06-23T10:00:00Z"
+}
+```
+
+---
+
+#### Action: `subscriptions`
+
+> **SocialGO extension.**
+
+List the current user's recurring subscriptions.
+
+**Parameters**
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `key` | yes | Your API key. |
+| `action` | yes | `subscriptions` |
+
+**Returns** — an array of subscriptions, each `{ subscription, service, link,
+status, quantity, runs, remaining_runs, interval, next_run, created_at }`.
+
+---
+
+#### Action: `coupon_validate`
+
+> **SocialGO extension.**
+
+Validate / **preview** a coupon **without** redeeming it. Read-only.
+
+**Parameters**
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `key` | yes | Your API key. |
+| `action` | yes | `coupon_validate` |
+| `code` | yes | Coupon code (case-insensitive). |
+
+**Returns**
+
+```json
+{ "valid": true, "code": "WELCOME10", "kind": "deposit_bonus", "value": "10" }
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `valid` | boolean | Whether the coupon is currently usable. |
+| `reason` | string? | Why it's invalid (when `valid` is false). |
+| `kind` | string? | `deposit_bonus` (percentage) or `wallet_credit` (fixed). |
+| `value` | string? | Bonus value. |
+| `minAmount` | string? | Minimum amount, if any. |
+| `expiresAt` | string? | Expiry, if any. |
+
+---
+
+#### Action: `affiliate_stats`
+
+> **SocialGO extension.**
+
+Return the current user's **own** affiliate stats and referral link. Scoped to
+the API key's user.
+
+**Parameters**
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `key` | yes | Your API key. |
+| `action` | yes | `affiliate_stats` |
+
+**Returns** — `{ referral_code, referral_link, affiliate_balance, enabled,
+commission_percent, level2_percent, minimum_payout, referrals_count,
+level2_count, total_earned, earned_l1, earned_l2 }`.
+
+---
+
+#### Action: `loyalty_status`
+
+> **SocialGO extension.**
+
+Return the current user's loyalty tier and points.
+
+**Parameters**
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `key` | yes | Your API key. |
+| `action` | yes | `loyalty_status` |
+
+**Returns** — `{ tier, label, next_threshold, progress_pct, points_balance,
+lifetime_spent, currency }`.
+
+---
+
+#### Action: `recommend`
+
+> **SocialGO extension.**
+
+Recommend related services from an anchor `service` id and/or a `platform`.
+
+**Parameters**
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `key` | yes | Your API key. |
+| `action` | yes | `recommend` |
+| `service` | no* | Anchor service id. |
+| `platform` | no* | Platform, e.g. `Instagram`. |
+| `limit` | no | Max results (1–50). |
+
+\* Provide `service`, `platform`, or both.
+
+**Returns** — a ranked array of `{ service, name, category, platform, rate, min,
+max, refill, reason }`, where `reason` is `bought_together` | `same_platform` |
+`popular`.
+
+---
+
+#### Action: `campaign_build`
+
+> **SocialGO extension.**
+
+Build a campaign **plan** from a budget and a delivery window. It does **not**
+place any order — it returns a proposal for review.
+
+**Parameters**
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `key` | yes | Your API key. |
+| `action` | yes | `campaign_build` |
+| `budget` | yes | Total budget, in the account currency. |
+| `days` | yes | Delivery window in days. |
+| `service` | no* | Target service id. |
+| `platform` | no* | Target platform, when no `service` is given. |
+| `boost_type` | no | Bias selection (followers, likes, views). |
+| `link` | no | Target link carried in the plan. |
+
+\* Provide a `service` id or a `platform`.
+
+**Returns** — `{ feasible, reason?, service?, totalQuantity?, totalCost?, runs?,
+intervalMinutes?, schedule?, params }`. When `feasible` is false, `reason`
+explains why.
+
+---
+
+#### Action: `storefront`
+
+> **SocialGO extension — public.**
+
+Resolve a **public** storefront by its `slug` and return the store with its
+packages. The displayed package `price` is a reference; the charged amount is
+recomputed server-side.
+
+**Parameters**
+
+| Field | Required | Description |
+| --- | --- | --- |
+| `action` | yes | `storefront` |
+| `slug` | yes | Public storefront slug. |
+
+**Returns** — `{ slug, title, description, theme, locale, packages: [{ id, title,
+description, quantity, price, serviceName }] }`.
 
 ---
 

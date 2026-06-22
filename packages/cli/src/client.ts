@@ -105,6 +105,175 @@ export interface CreateOrderInput extends OrderTypeParams {
   interval?: number;
 }
 
+/** Uma linha de `mass_order` (vários pedidos numa chamada). */
+export interface MassOrderLine {
+  service: number | string;
+  link: string;
+  quantity: number;
+}
+
+/** Resultado de `mass_order` — pedidos criados + erros por linha (linha que falha não derruba as demais). */
+export interface MassOrderResult {
+  orders: Array<{ line: number; order: number | string }>;
+  errors: Array<{ line: number; reason: string }>;
+}
+
+/** Parâmetros de `subscription_create` — assinatura recorrente do próprio usuário. */
+export interface SubscriptionCreateInput {
+  service: number | string;
+  link: string;
+  quantity: number;
+  runs: number;
+  /** Intervalo entre ciclos, em MINUTOS. */
+  interval: number;
+}
+
+/** Resultado de `subscription_create`. */
+export interface SubscriptionCreateResult {
+  subscription: string;
+  status: string;
+  runs: number;
+  remaining_runs: number;
+  interval: number;
+  next_run: string | null;
+}
+
+/** Item de `subscriptions` — assinatura do próprio usuário. */
+export interface SubscriptionListItem {
+  subscription: string;
+  service: number | string;
+  link: string;
+  status: string;
+  quantity: number;
+  runs: number;
+  remaining_runs: number;
+  interval: number;
+  next_run: string | null;
+  created_at: string;
+}
+
+/** Resultado de `coupon_validate` — validação/preview (NÃO resgata). */
+export interface CouponPreview {
+  valid: boolean;
+  reason?: string;
+  code?: string;
+  kind?: "deposit_bonus" | "wallet_credit" | string;
+  /** deposit_bonus = percentual; wallet_credit = valor fixo creditado. */
+  value?: string;
+  minAmount?: string | null;
+  expiresAt?: string | null;
+}
+
+/** Resultado de `affiliate_stats` — stats + link DO PRÓPRIO user. */
+export interface AffiliateStats {
+  referral_code: string;
+  referral_link: string;
+  affiliate_balance: string;
+  enabled: boolean;
+  commission_percent: number;
+  level2_percent: number;
+  minimum_payout: number;
+  referrals_count: number;
+  level2_count: number;
+  total_earned: string;
+  earned_l1: string;
+  earned_l2: string;
+}
+
+/** Resultado de `loyalty_status` — tier/pontos DO próprio user. */
+export interface LoyaltyStatus {
+  tier: string;
+  label: string;
+  next_threshold: number | null;
+  progress_pct: number;
+  points_balance: number;
+  lifetime_spent: string;
+  currency: string;
+}
+
+/** Filtros de `recommend` — serviço-âncora e/ou plataforma. */
+export interface RecommendFilters {
+  service?: number | string;
+  platform?: string;
+  limit?: number;
+}
+
+/** Item recomendado (`recommend`). */
+export interface RecommendedService {
+  service: number | string;
+  name: string;
+  category: string;
+  platform: string | null;
+  rate: string;
+  min: string;
+  max: string;
+  refill: boolean;
+  reason: string;
+}
+
+/** Parâmetros de `campaign_build` — devolve um PLANO (não cria pedido). */
+export interface CampaignBuildInput {
+  budget: number;
+  /** Janela de entrega gradual, em dias. */
+  days: number;
+  service?: number | string;
+  platform?: string;
+  boost_type?: string;
+  link?: string;
+}
+
+/** Uma execução do cronograma do plano de campanha. */
+export interface CampaignScheduleEntry {
+  run: number;
+  quantity: number;
+  dayOffset: number;
+}
+
+/** PLANO de campanha (`campaign_build`) — proposta para revisão, não cria pedido. */
+export interface CampaignPlan {
+  feasible: boolean;
+  reason?: string;
+  service?: {
+    id: number | string;
+    name: string;
+    platform: string | null;
+    serviceTag: string | null;
+  };
+  totalQuantity?: number;
+  totalCost?: number;
+  runs?: number;
+  intervalMinutes?: number;
+  schedule?: CampaignScheduleEntry[];
+  params: {
+    platform?: string;
+    boostType?: string;
+    serviceId?: number | string;
+    budget: number;
+    days: number;
+  };
+}
+
+/** Pacote público de uma storefront (`storefront`). */
+export interface StorefrontPackage {
+  id: string;
+  title: string;
+  description: string | null;
+  quantity: number;
+  /** Preço EXIBIDO (referência); o cobrado é recalculado no servidor. */
+  price: string;
+  serviceName: string | null;
+}
+
+/** Loja pública resolvida pelo slug (`storefront`). */
+export interface Storefront {
+  slug: string;
+  title: string;
+  description: string | null;
+  theme: string;
+  locale: string;
+  packages: StorefrontPackage[];
+}
+
 export class SocialGoApiError extends Error {
   constructor(
     message: string,
@@ -427,6 +596,82 @@ export class SocialGoClient {
   /** Cria um pagamento pendente para recarregar a carteira (conclui no painel). */
   addFunds(amount: number, method: string): Promise<AddFundsResult> {
     return this.call<AddFundsResult>("add_funds", { amount, method });
+  }
+
+  // ---- Pedidos em lote ------------------------------------------------------
+
+  /**
+   * Vários pedidos numa única chamada (`mass_order`). Aceita uma LISTA
+   * estruturada de linhas OU um texto CSV `service|link|quantity` (uma por
+   * linha). Cada linha é independente — uma falha não derruba as demais.
+   */
+  massOrder(orders: MassOrderLine[] | string): Promise<MassOrderResult> {
+    const csv =
+      typeof orders === "string"
+        ? orders
+        : orders.map((o) => `${o.service}|${o.link}|${o.quantity}`).join("\n");
+    return this.call<MassOrderResult>("mass_order", { orders: csv });
+  }
+
+  // ---- Assinaturas ----------------------------------------------------------
+
+  /** Cria uma assinatura recorrente do próprio usuário (`subscription_create`). */
+  subscriptionCreate(input: SubscriptionCreateInput): Promise<SubscriptionCreateResult> {
+    return this.call<SubscriptionCreateResult>("subscription_create", {
+      service: input.service,
+      link: input.link,
+      quantity: input.quantity,
+      runs: input.runs,
+      interval: input.interval,
+    });
+  }
+
+  /** Lista as assinaturas do próprio usuário (`subscriptions`). */
+  subscriptions(): Promise<SubscriptionListItem[]> {
+    return this.call<SubscriptionListItem[]>("subscriptions");
+  }
+
+  // ---- Cupom / afiliados / fidelidade ---------------------------------------
+
+  /** Valida/preview um cupom (`coupon_validate`) — NÃO resgata. */
+  couponValidate(code: string): Promise<CouponPreview> {
+    return this.call<CouponPreview>("coupon_validate", { code });
+  }
+
+  /** Stats + link de afiliado do PRÓPRIO usuário (`affiliate_stats`). */
+  affiliateStats(): Promise<AffiliateStats> {
+    return this.call<AffiliateStats>("affiliate_stats");
+  }
+
+  /** Tier/pontos do PRÓPRIO usuário (`loyalty_status`). */
+  loyaltyStatus(): Promise<LoyaltyStatus> {
+    return this.call<LoyaltyStatus>("loyalty_status");
+  }
+
+  // ---- Recomendação / campanha / storefront ---------------------------------
+
+  /** Serviços recomendados por serviço-âncora e/ou plataforma (`recommend`). */
+  recommend(filters: RecommendFilters = {}): Promise<RecommendedService[]> {
+    const params: Record<string, unknown> = {};
+    if (filters.service !== undefined) params.service = filters.service;
+    if (filters.platform !== undefined) params.platform = filters.platform;
+    if (filters.limit !== undefined) params.limit = filters.limit;
+    return this.call<RecommendedService[]>("recommend", params);
+  }
+
+  /** Devolve um PLANO de campanha (`campaign_build`) — não cria pedido sozinho. */
+  campaignBuild(input: CampaignBuildInput): Promise<CampaignPlan> {
+    const params: Record<string, unknown> = { budget: input.budget, days: input.days };
+    if (input.service !== undefined) params.service = input.service;
+    if (input.platform !== undefined) params.platform = input.platform;
+    if (input.boost_type !== undefined) params.boost_type = input.boost_type;
+    if (input.link !== undefined) params.link = input.link;
+    return this.call<CampaignPlan>("campaign_build", params);
+  }
+
+  /** Resolve uma loja pública pelo slug → pacotes (`storefront`). */
+  storefront(slug: string): Promise<Storefront> {
+    return this.call<Storefront>("storefront", { slug });
   }
 
   // ---- Admin ----------------------------------------------------------------

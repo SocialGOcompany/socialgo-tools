@@ -10,7 +10,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Model Context Protocol server for SocialGO — lets AI assistants (Claude, etc.) search services and place SMM orders.",
   "license": "MIT",
   "type": "module",

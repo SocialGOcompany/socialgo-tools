@@ -35,6 +35,9 @@ import {
   type GuestService,
   type OrderListItem,
   type OrderTypeParams,
+  type RecommendedService,
+  type StorefrontPackage,
+  type SubscriptionListItem,
 } from "./client.js";
 import type { SmmOrderStatus } from "@socialgo/sdk";
 
@@ -282,6 +285,120 @@ function renderOrderStatus(id: string, status: SmmOrderStatus): void {
   out(`  ${c.bold("Restante")}     ${status.remains}`);
 }
 
+function renderSubscriptionsTable(subs: SubscriptionListItem[]): void {
+  if (subs.length === 0) {
+    out(c.yellow("Nenhuma assinatura encontrada."));
+    return;
+  }
+  const rows = subs.map((s) => ({
+    id: String(s.subscription ?? ""),
+    service: String(s.service ?? ""),
+    status: String(s.status ?? ""),
+    qty: String(s.quantity ?? ""),
+    runs: `${s.remaining_runs ?? "?"}/${s.runs ?? "?"}`,
+    interval: `${s.interval ?? "?"}min`,
+    next: String(s.next_run ?? ""),
+  }));
+  const w = {
+    id: Math.max(2, ...rows.map((r) => r.id.length)),
+    service: Math.max(7, ...rows.map((r) => r.service.length)),
+    status: Math.max(8, ...rows.map((r) => r.status.length)),
+    qty: Math.max(3, ...rows.map((r) => r.qty.length)),
+    runs: Math.max(5, ...rows.map((r) => r.runs.length)),
+    interval: Math.max(8, ...rows.map((r) => r.interval.length)),
+  };
+  out(
+    [
+      c.bold(pad("ID", w.id)),
+      c.bold(pad("SERVIÇO", w.service)),
+      c.bold(pad("STATUS", w.status)),
+      c.bold(padStart("QTD", w.qty)),
+      c.bold(padStart("RUNS", w.runs)),
+      c.bold(padStart("INTERVALO", w.interval)),
+      c.bold("PRÓXIMO"),
+    ].join("  "),
+  );
+  for (const r of rows) {
+    out(
+      [
+        c.cyan(pad(r.id, w.id)),
+        c.dim(pad(r.service, w.service)),
+        pad(colorStatus(r.status), w.status + (colorStatus(r.status).length - r.status.length)),
+        padStart(r.qty, w.qty),
+        padStart(r.runs, w.runs),
+        padStart(r.interval, w.interval),
+        c.dim(r.next || "—"),
+      ].join("  "),
+    );
+  }
+  out();
+  out(c.dim(`${subs.length} assinatura(s). (runs = restantes/total)`));
+}
+
+function renderRecommendTable(items: RecommendedService[]): void {
+  if (items.length === 0) {
+    out(c.yellow("Nenhuma recomendação encontrada."));
+    return;
+  }
+  const rows = items.map((s) => ({
+    id: String(s.service ?? ""),
+    name: String(s.name ?? ""),
+    platform: String(s.platform ?? ""),
+    rate: String(s.rate ?? ""),
+    reason: String(s.reason ?? ""),
+  }));
+  const w = {
+    id: Math.max(2, ...rows.map((r) => r.id.length)),
+    name: Math.min(42, Math.max(4, ...rows.map((r) => r.name.length))),
+    platform: Math.min(14, Math.max(9, ...rows.map((r) => r.platform.length))),
+    rate: Math.max(7, ...rows.map((r) => r.rate.length)),
+  };
+  out(
+    [
+      c.bold(pad("ID", w.id)),
+      c.bold(pad("NOME", w.name)),
+      c.bold(pad("PLATAFORMA", w.platform)),
+      c.bold(padStart("RATE/1k", w.rate)),
+      c.bold("MOTIVO"),
+    ].join("  "),
+  );
+  const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
+  for (const r of rows) {
+    out(
+      [
+        c.cyan(pad(r.id, w.id)),
+        pad(clip(r.name, w.name), w.name),
+        c.dim(pad(clip(r.platform || "—", w.platform), w.platform)),
+        padStart(r.rate, w.rate),
+        c.dim(r.reason),
+      ].join("  "),
+    );
+  }
+  out();
+  out(c.dim(`${items.length} recomendação(ões).`));
+}
+
+function renderStorefrontPackages(pkgs: StorefrontPackage[]): void {
+  if (pkgs.length === 0) {
+    out(c.yellow("Esta loja não tem pacotes publicados."));
+    return;
+  }
+  for (const p of pkgs) {
+    out(`  ${c.cyan(p.id)}  ${c.bold(p.title)}`);
+    const line = [
+      p.serviceName ? c.dim(p.serviceName) : "",
+      `qtd ${p.quantity}`,
+      c.green(p.price),
+    ]
+      .filter(Boolean)
+      .join("  ·  ");
+    out(`      ${line}`);
+    if (p.description) out(`      ${c.dim(p.description)}`);
+  }
+  out();
+  out(c.dim(`${pkgs.length} pacote(s). Preço exibido é referência; o cobrado é recalculado no servidor.`));
+}
+
 // ---- CLI --------------------------------------------------------------------
 
 const program = new Command();
@@ -289,7 +406,7 @@ const program = new Command();
 program
   .name("socialgo")
   .description("CLI do SocialGO — catálogo, pedidos, refill/cancel, saldo e admin de um painel SMM (API v2).")
-  .version("0.1.0")
+  .version("0.2.0")
   .option("--json", "saída em JSON cru (para scripts)", false)
   .option("--api-url <url>", "base da API (sobrescreve SOCIALGO_API_URL)")
   .option("--key <key>", "chave de API (sobrescreve SOCIALGO_API_KEY)")
@@ -313,6 +430,15 @@ Exemplos:
   socialgo order cancel 98765 4321
   socialgo refill-status --order 98765
   socialgo orders
+  socialgo mass-order --line "1234|https://insta.com/p/a|1000" --line "55|https://insta.com/p/b|500"
+  socialgo subscription create --service 70 --link <url> --quantity 100 --runs 30 --interval 1440
+  socialgo subscription list
+  socialgo coupon validate PROMO10
+  socialgo affiliate stats
+  socialgo loyalty
+  socialgo recommend 1234
+  socialgo campaign build --budget 100 --days 30 --platform instagram --goal followers
+  socialgo storefront minha-loja
 `,
   );
 
@@ -595,6 +721,366 @@ program
       const list = await getClient().listOrders();
       if (shouldJson()) return printJson(list);
       renderOrdersTable(list);
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+// mass-order -------------------------------------------------------------------
+
+program
+  .command("mass-order")
+  .description("cria vários pedidos numa única chamada (cada linha é independente)")
+  .option("--file <arquivo>", "arquivo CSV com uma linha por pedido: service|link|quantity")
+  .option(
+    "--line <s|l|q...>",
+    "linha inline service|link|quantity (repita --line por pedido)",
+    (val: string, acc: string[]) => {
+      acc.push(val);
+      return acc;
+    },
+    [] as string[],
+  )
+  .addHelpText(
+    "after",
+    `
+Formato de cada linha (pipe-separado): ${c.bold("service|link|quantity")}
+
+Exemplos:
+  socialgo mass-order --line "1234|https://insta.com/p/a|1000" --line "55|https://insta.com/p/b|500"
+  socialgo mass-order --file ./pedidos.csv
+  # pedidos.csv:
+  #   1234|https://insta.com/p/a|1000
+  #   55|https://insta.com/p/b|500
+`,
+  )
+  .action(async (opts: { file?: string; line: string[] }) => {
+    try {
+      let csv: string;
+      if (opts.file) {
+        csv = readFileSync(opts.file, "utf8");
+      } else if (opts.line.length > 0) {
+        csv = opts.line.join("\n");
+      } else {
+        fail("Informe --file <arquivo> ou ao menos uma --line \"service|link|quantity\".");
+      }
+      const result = await getClient().massOrder(csv);
+      if (shouldJson()) return printJson(result);
+      const created = result.orders ?? [];
+      const errors = result.errors ?? [];
+      if (created.length > 0) {
+        out(c.bold(`${c.green("✔")} ${created.length} pedido(s) criado(s):`));
+        for (const o of created) {
+          out(`  ${c.dim(`linha ${o.line}`)}  Order ID ${c.cyan(String(o.order))}`);
+        }
+      }
+      if (errors.length > 0) {
+        if (created.length > 0) out();
+        out(c.bold(`${c.red("✖")} ${errors.length} linha(s) com erro:`));
+        for (const e of errors) {
+          out(`  ${c.dim(`linha ${e.line}`)}  ${c.red(e.reason)}`);
+        }
+      }
+      if (created.length === 0 && errors.length === 0) {
+        out(c.yellow("Nenhum pedido processado."));
+      }
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+// subscription -----------------------------------------------------------------
+
+const subscription = program
+  .command("subscription")
+  .description("assinaturas recorrentes (drip-feed agendado) do seu usuário");
+
+subscription
+  .command("create")
+  .description("cria uma assinatura recorrente: entrega N execuções a cada X minutos")
+  .requiredOption("--service <id>", "id do serviço")
+  .requiredOption("--link <url>", "link de destino (perfil/post/vídeo)")
+  .requiredOption("--quantity <n>", "quantidade por execução", (v) => parseInt(v, 10))
+  .requiredOption("--runs <n>", "número total de execuções", (v) => parseInt(v, 10))
+  .requiredOption("--interval <min>", "intervalo entre execuções, em minutos", (v) => parseInt(v, 10))
+  .addHelpText(
+    "after",
+    `
+Exemplo:
+  socialgo subscription create --service 70 --link https://insta.com/u --quantity 100 --runs 30 --interval 1440
+`,
+  )
+  .action(
+    async (opts: { service: string; link: string; quantity: number; runs: number; interval: number }) => {
+      try {
+        for (const [flag, val] of [
+          ["--quantity", opts.quantity],
+          ["--runs", opts.runs],
+          ["--interval", opts.interval],
+        ] as const) {
+          if (!Number.isFinite(val) || (val as number) <= 0) {
+            fail(`${flag} precisa ser um número inteiro positivo.`);
+          }
+        }
+        const r = await getClient().subscriptionCreate({
+          service: opts.service,
+          link: opts.link,
+          quantity: opts.quantity,
+          runs: opts.runs,
+          interval: opts.interval,
+        });
+        if (shouldJson()) return printJson(r);
+        out(`${c.green("✔")} Assinatura criada (${c.yellow(r.status)}).`);
+        out(`  ${c.bold("Subscription ID")}  ${c.cyan(String(r.subscription))}`);
+        out(`  ${c.bold("Execuções")}        ${r.remaining_runs}/${r.runs} restantes`);
+        out(`  ${c.bold("Intervalo")}        ${r.interval} min`);
+        if (r.next_run) out(`  ${c.bold("Próxima")}          ${c.dim(r.next_run)}`);
+        out();
+        out(c.dim("Acompanhe: socialgo subscription list"));
+      } catch (err) {
+        handleError(err);
+      }
+    },
+  );
+
+subscription
+  .command("list")
+  .description("lista as assinaturas do seu usuário")
+  .action(async () => {
+    try {
+      const list = await getClient().subscriptions();
+      if (shouldJson()) return printJson(list);
+      renderSubscriptionsTable(list);
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+// coupon -----------------------------------------------------------------------
+
+const coupon = program.command("coupon").description("cupons");
+
+coupon
+  .command("validate <code>")
+  .description("valida/preview um cupom (NÃO resgata)")
+  .action(async (code: string) => {
+    try {
+      const r = await getClient().couponValidate(code);
+      if (shouldJson()) return printJson(r);
+      if (!r.valid) {
+        out(`${c.red("✖")} Cupom ${c.cyan(code)} inválido.`);
+        if (r.reason) out(`  ${c.dim(r.reason)}`);
+        return;
+      }
+      out(`${c.green("✔")} Cupom ${c.cyan(r.code ?? code)} válido.`);
+      if (r.kind) {
+        const label = r.kind === "deposit_bonus" ? "bônus em depósito" : r.kind === "wallet_credit" ? "crédito na carteira" : r.kind;
+        out(`  ${c.bold("Tipo")}        ${label}`);
+      }
+      if (r.value) {
+        const suffix = r.kind === "deposit_bonus" ? "%" : "";
+        out(`  ${c.bold("Valor")}       ${r.value}${suffix}`);
+      }
+      if (r.minAmount) out(`  ${c.bold("Mínimo")}      ${r.minAmount}`);
+      if (r.expiresAt) out(`  ${c.bold("Expira em")}   ${c.dim(r.expiresAt)}`);
+      out();
+      out(c.dim("Preview apenas — o cupom é resgatado no momento do depósito/pedido."));
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+// affiliate --------------------------------------------------------------------
+
+const affiliate = program
+  .command("affiliate")
+  .description("programa de afiliados do seu usuário");
+
+affiliate
+  .command("stats")
+  .description("seus números de afiliado (indicações, comissões, saldo)")
+  .action(async () => {
+    try {
+      const s = await getClient().affiliateStats();
+      if (shouldJson()) return printJson(s);
+      out(c.bold("Afiliado"));
+      out(`  ${c.bold("Status")}        ${s.enabled ? c.green("ativo") : c.dim("inativo")}`);
+      out(`  ${c.bold("Código")}        ${c.cyan(s.referral_code)}`);
+      out(`  ${c.bold("Link")}          ${c.cyan(s.referral_link)}`);
+      out(`  ${c.bold("Saldo")}         ${c.green(s.affiliate_balance)}`);
+      out(`  ${c.bold("Comissão")}      ${s.commission_percent}% (nível 1) · ${s.level2_percent}% (nível 2)`);
+      out(`  ${c.bold("Indicações")}    ${s.referrals_count} (nível 1) · ${s.level2_count} (nível 2)`);
+      out(`  ${c.bold("Total ganho")}   ${s.total_earned}  ${c.dim(`(L1 ${s.earned_l1} · L2 ${s.earned_l2})`)}`);
+      out(`  ${c.bold("Saque mínimo")}  ${s.minimum_payout}`);
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+affiliate
+  .command("link")
+  .description("mostra apenas seu link de indicação (e o código)")
+  .action(async () => {
+    try {
+      const s = await getClient().affiliateStats();
+      if (shouldJson()) return printJson({ referral_code: s.referral_code, referral_link: s.referral_link });
+      out(s.referral_link);
+      out(c.dim(`código: ${s.referral_code}`));
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+// loyalty ----------------------------------------------------------------------
+
+program
+  .command("loyalty")
+  .description("seu tier e pontos de fidelidade")
+  .action(async () => {
+    try {
+      const l = await getClient().loyaltyStatus();
+      if (shouldJson()) return printJson(l);
+      out(c.bold("Fidelidade"));
+      out(`  ${c.bold("Tier")}          ${c.cyan(l.label)} ${c.dim(`(${l.tier})`)}`);
+      out(`  ${c.bold("Pontos")}        ${l.points_balance}`);
+      out(`  ${c.bold("Gasto total")}   ${l.lifetime_spent} ${l.currency}`);
+      if (l.next_threshold !== null) {
+        out(`  ${c.bold("Progresso")}     ${l.progress_pct}% para o próximo tier (${l.next_threshold})`);
+      } else {
+        out(`  ${c.bold("Progresso")}     ${c.green("tier máximo")}`);
+      }
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+// recommend --------------------------------------------------------------------
+
+program
+  .command("recommend [serviceIdOrPlatform]")
+  .description("serviços recomendados a partir de um serviço-âncora e/ou plataforma")
+  .option("--service <id>", "serviço-âncora (id)")
+  .option("--platform <plataforma>", "plataforma (instagram, tiktok, …)")
+  .option("--limit <n>", "limite de resultados", (v) => parseInt(v, 10))
+  .addHelpText(
+    "after",
+    `
+O argumento posicional é um atalho: se for numérico vira --service, senão --platform.
+
+Exemplos:
+  socialgo recommend 1234
+  socialgo recommend instagram
+  socialgo recommend --service 1234 --limit 5
+  socialgo recommend --platform tiktok
+`,
+  )
+  .action(
+    async (arg: string | undefined, opts: { service?: string; platform?: string; limit?: number }) => {
+      try {
+        let service = opts.service;
+        let platform = opts.platform;
+        if (arg !== undefined) {
+          if (/^\d+$/.test(arg)) service = service ?? arg;
+          else platform = platform ?? arg;
+        }
+        if (!service && !platform) {
+          fail("Informe um serviço-âncora ou plataforma: socialgo recommend <serviceId|platform> (ou --service/--platform).");
+        }
+        const items = await getClient().recommend({
+          service,
+          platform,
+          limit: Number.isFinite(opts.limit as number) ? opts.limit : undefined,
+        });
+        if (shouldJson()) return printJson(items);
+        renderRecommendTable(items);
+      } catch (err) {
+        handleError(err);
+      }
+    },
+  );
+
+// campaign ---------------------------------------------------------------------
+
+const campaign = program.command("campaign").description("planejamento de campanha");
+
+campaign
+  .command("build")
+  .description("monta um PLANO de campanha a partir de budget/objetivo/dias (não cria pedido)")
+  .requiredOption("--budget <valor>", "orçamento total", (v) => parseFloat(v))
+  .requiredOption("--days <n>", "janela de entrega gradual, em dias", (v) => parseInt(v, 10))
+  .option("--service <id>", "serviço-âncora (id)")
+  .option("--platform <plataforma>", "plataforma (instagram, tiktok, …)")
+  .option("--goal <objetivo>", "tipo de impulsionamento (ex.: followers, views, likes)")
+  .option("--link <url>", "link de destino (opcional, vai no plano)")
+  .addHelpText(
+    "after",
+    `
+Devolve um PLANO (cronograma + custo + quantidade). NÃO cria pedido — revise e
+execute depois (ex.: socialgo subscription create / socialgo order add).
+
+Exemplos:
+  socialgo campaign build --budget 100 --days 30 --platform instagram --goal followers
+  socialgo campaign build --budget 50 --days 7 --service 1234
+`,
+  )
+  .action(
+    async (opts: { budget: number; days: number; service?: string; platform?: string; goal?: string; link?: string }) => {
+      try {
+        if (!Number.isFinite(opts.budget) || opts.budget <= 0) fail("--budget precisa ser um número positivo.");
+        if (!Number.isFinite(opts.days) || opts.days <= 0) fail("--days precisa ser um inteiro positivo.");
+        const plan = await getClient().campaignBuild({
+          budget: opts.budget,
+          days: opts.days,
+          service: opts.service,
+          platform: opts.platform,
+          boost_type: opts.goal,
+          link: opts.link,
+        });
+        if (shouldJson()) return printJson(plan);
+        if (!plan.feasible) {
+          out(`${c.red("✖")} Plano inviável.`);
+          if (plan.reason) out(`  ${c.dim(plan.reason)}`);
+          return;
+        }
+        out(`${c.green("✔")} Plano de campanha (proposta — nada foi cobrado).`);
+        if (plan.service) {
+          out(`  ${c.bold("Serviço")}       ${c.cyan(String(plan.service.id))} ${plan.service.name}`);
+          if (plan.service.platform) out(`  ${c.bold("Plataforma")}    ${plan.service.platform}`);
+        }
+        if (plan.totalQuantity !== undefined) out(`  ${c.bold("Qtd total")}     ${plan.totalQuantity}`);
+        if (plan.totalCost !== undefined) out(`  ${c.bold("Custo total")}   ${c.green(String(plan.totalCost))}`);
+        if (plan.runs !== undefined) out(`  ${c.bold("Execuções")}     ${plan.runs}`);
+        if (plan.intervalMinutes !== undefined) out(`  ${c.bold("Intervalo")}     ${plan.intervalMinutes} min`);
+        const schedule = plan.schedule ?? [];
+        if (schedule.length > 0) {
+          out();
+          out(c.bold("  Cronograma:"));
+          for (const s of schedule) {
+            out(`    ${c.dim(`run ${padStart(String(s.run), 3)}`)}  dia +${padStart(String(s.dayOffset), 2)}  qtd ${s.quantity}`);
+          }
+        }
+        out();
+        out(c.dim("Revise e execute com: socialgo subscription create / socialgo order add"));
+      } catch (err) {
+        handleError(err);
+      }
+    },
+  );
+
+// storefront -------------------------------------------------------------------
+
+program
+  .command("storefront <slug>")
+  .description("resolve uma loja pública pelo slug e lista seus pacotes")
+  .action(async (slug: string) => {
+    try {
+      const store = await getClient().storefront(slug);
+      if (shouldJson()) return printJson(store);
+      out(`${c.bold(store.title)} ${c.dim(`(${store.slug})`)}`);
+      if (store.description) out(`  ${c.dim(store.description)}`);
+      out(c.dim(`  tema ${store.theme} · locale ${store.locale}`));
+      out();
+      renderStorefrontPackages(store.packages ?? []);
     } catch (err) {
       handleError(err);
     }

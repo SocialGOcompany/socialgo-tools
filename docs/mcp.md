@@ -261,19 +261,32 @@ open agent mode.
 
 ## Tools at a glance
 
-The server registers **12 tools**. All return their result as JSON text.
+The server registers **23 tools**. All return their result as JSON text. The
+assistant works in any language — ask in English, Portuguese or Spanish and it
+reads the figures back to you in the language you used.
 
 | Tool | Mode | Purpose | Required input |
 | ---- | ---- | ------- | -------------- |
 | `socialgo_balance` | Reseller | Account balance + currency. | _(none)_ |
+| `socialgo_wallet` | Reseller | Balance + currency plus recent ledger transactions. | _(none)_ |
+| `socialgo_add_funds` | Reseller | Create a pending wallet top-up; finish payment in the panel. | `amount`, `method` |
 | `socialgo_services` | Reseller | Search/filter the catalog by natural-language intent. | _(none)_ |
 | `socialgo_service_details` | Reseller | Full details of one service by id. | `service` |
+| `socialgo_recommend` | Reseller | Recommend related services from an anchor service and/or platform. | `service` or `platform` |
 | `socialgo_place_order` | Reseller | Create an order (per-type params + drip-feed). | `service`, `link` |
+| `socialgo_mass_order` | Reseller | Place several orders in one call; each line independent. | `orders` |
+| `socialgo_build_campaign` | Reseller | Build a campaign plan from budget + window + goal (no order placed). | `budget`, `days` + (`service` or `platform`) |
+| `socialgo_create_subscription` | Reseller | Recurring subscription: re-order every `interval` minutes for `runs` runs. | `service`, `link`, `quantity`, `runs`, `interval` |
+| `socialgo_subscriptions` | Reseller | List the user's recurring subscriptions. | _(none)_ |
 | `socialgo_order_status` | Reseller | Status of one or many orders. | `order` or `orders` |
 | `socialgo_refill` | Reseller | Request a refill for one or many orders. | `order` or `orders` |
 | `socialgo_refill_status` | Reseller | Status of a refill (by refill id or order id). | `refill` or `order` |
 | `socialgo_cancel` | Reseller | Cancel one or many orders. | `orders` |
 | `socialgo_orders` | Reseller | Account order history. | _(none)_ |
+| `socialgo_validate_coupon` | Reseller | Preview a coupon without redeeming it. | `code` |
+| `socialgo_affiliate_stats` | Reseller | The user's own referral link and affiliate numbers. | _(none)_ |
+| `socialgo_loyalty_status` | Reseller | The user's loyalty tier, points and progress. | _(none)_ |
+| `socialgo_storefront` | Public | Resolve a public storefront by slug with its packages. | `slug` |
 | `socialgo_guest_gateways` | Guest | List active payment methods for guest checkout. | _(none)_ |
 | `socialgo_guest_order` | Guest | Buy without an account; returns a payment URL. | `email`, `serviceId`, `link` |
 | `socialgo_guest_order_status` | Guest | Track a guest order by token or email. | `id` + (`token` or `email`) |
@@ -594,6 +607,189 @@ Lists the account's order history on the panel (`id`, `charge`, `status`,
 | _(none)_ | — | — | No inputs. |
 
 > _"Show my recent SocialGO orders."_
+
+---
+
+### Wallet, growth & extras
+
+These tools cover the wallet, recurring delivery, recommendations, campaign
+planning, coupons, the affiliate program and public storefronts. All are scoped
+to the API key's user (except `socialgo_storefront`, which is public).
+
+#### `socialgo_wallet`
+
+Richer than `socialgo_balance`: returns the current `balance` + `currency` plus
+the most recent ledger `transactions` (`{ id, type, amount, balanceAfter,
+description, createdAt }`). Use it to explain recent deposits and charges.
+
+| Input | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| _(none)_ | — | — | No inputs. |
+
+> _"What's in my wallet, and what were my last few charges?"_
+
+---
+
+#### `socialgo_add_funds`
+
+Creates a **pending** payment to top up the wallet and returns the payment to be
+completed in the panel (`{ payment, status, amount, currency, method, message }`).
+Balance is **not** credited immediately — funds land only after the payment
+confirms. Use `socialgo_guest_gateways` to confirm which methods are active first.
+
+| Input | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| `amount` | number | Yes | Amount to add, in the account currency. |
+| `method` | string | Yes | Payment gateway. Prefer one returned active by `socialgo_guest_gateways`. |
+
+> _"Add 50 to my wallet with mercadopago."_
+
+---
+
+#### `socialgo_mass_order`
+
+Places **several** orders in a single call. Each line is independent — a failing
+line does not cancel the others. Returns `{ orders: [{ line, order }], errors:
+[{ line, reason }] }`. Resolve each `service` id with `socialgo_services` first.
+
+| Input | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| `orders` | array of `{ service, link, quantity }` | Yes | Orders to create in one batch. |
+
+> _"Order 1,000 followers for these three profiles in one go."_
+
+---
+
+#### `socialgo_create_subscription`
+
+Creates a **recurring** subscription for the current user — it auto re-orders a
+service on a fixed cadence. Returns `{ subscription, status, runs,
+remaining_runs, interval, next_run }`. Differs from drip-feed (a single
+fractioned order): a subscription is an ongoing schedule.
+
+| Input | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| `service` | number \| string | Yes | Service id (from `socialgo_services`). |
+| `link` | string | Yes | Target link (profile, post, video). |
+| `quantity` | number | Yes | Quantity ordered on **each** run. |
+| `runs` | number | Yes | Total number of recurring runs. |
+| `interval` | number | Yes | Interval in **minutes** between runs. |
+
+> _"Drip 100 followers a day to my profile for 30 days."_
+
+---
+
+#### `socialgo_subscriptions`
+
+Lists the user's recurring subscriptions (`{ subscription, service, link,
+status, quantity, runs, remaining_runs, interval, next_run, created_at }`).
+
+| Input | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| _(none)_ | — | — | No inputs. |
+
+> _"List my active subscriptions."_
+
+---
+
+#### `socialgo_validate_coupon`
+
+Validates / **previews** a coupon code **without** redeeming it. Returns `{ valid,
+reason?, code?, kind?, value?, minAmount?, expiresAt? }`, where `kind` is
+`deposit_bonus` (percentage) or `wallet_credit` (fixed credit). Read-only — it
+never applies the coupon.
+
+| Input | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| `code` | string | Yes | Coupon code to validate (case-insensitive). |
+
+> _"Is the coupon WELCOME10 still valid?"_
+
+---
+
+#### `socialgo_affiliate_stats`
+
+Returns the user's **own** affiliate stats and referral link (`{ referral_code,
+referral_link, affiliate_balance, enabled, commission_percent, level2_percent,
+minimum_payout, referrals_count, level2_count, total_earned, earned_l1,
+earned_l2 }`). Scoped to the API key's user — never exposes other users' data.
+
+| Input | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| _(none)_ | — | — | No inputs. |
+
+> _"What's my referral link and how much have I earned?"_
+
+---
+
+#### `socialgo_loyalty_status`
+
+Returns the user's loyalty status (`{ tier, label, next_threshold, progress_pct,
+points_balance, lifetime_spent, currency }`) — use it to tell the user their tier
+and how close they are to the next one.
+
+| Input | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| _(none)_ | — | — | No inputs. |
+
+> _"What loyalty tier am I on?"_
+
+---
+
+#### `socialgo_recommend`
+
+**Recommends** related services given an anchor `service` id and/or a `platform`.
+Returns a ranked list of `{ service, name, category, platform, rate, min, max,
+refill, reason }`, where `reason` is `bought_together` | `same_platform` |
+`popular`. The natural cross-sell after a user shows interest.
+
+| Input | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| `service` | number \| string | No* | Anchor service id to recommend around. |
+| `platform` | string | No* | Platform to recommend for, e.g. `Instagram`, `TikTok`. |
+| `limit` | number | No | Max recommendations to return (1–50). |
+
+\* Provide `service`, `platform`, or both.
+
+> _"What else pairs well with Instagram followers?"_
+
+---
+
+#### `socialgo_build_campaign`
+
+**Builds a campaign plan** from a budget, a goal and a delivery window — it does
+**not** place any order, it only returns the proposed plan for review. Returns
+`{ feasible, reason?, service?, totalQuantity?, totalCost?, runs?,
+intervalMinutes?, schedule?, params }`. After review, execute via
+`socialgo_place_order` (drip-feed) or `socialgo_create_subscription`.
+
+| Input | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| `budget` | number | Yes | Total budget, in the account currency. |
+| `days` | number | Yes | Delivery window in **days** for gradual rollout. |
+| `service` | number \| string | No* | Target service id. Provide this **or** `platform`. |
+| `platform` | string | No* | Target platform, used when no `service` id is given. |
+| `boost_type` | string | No | Bias service selection, e.g. `followers`, `likes`, `views`. |
+| `link` | string | No | Target link the plan should boost. |
+
+\* Provide a `service` id or a `platform`.
+
+> _"Plan a 30-day Instagram followers campaign for a $100 budget."_
+
+---
+
+#### `socialgo_storefront`
+
+Resolves a **public storefront** by its `slug` and returns the store with its
+packages (`{ slug, title, description, theme, locale, packages: [{ id, title,
+description, quantity, price, serviceName }] }`). The displayed `price` is a
+reference — the charged amount is recomputed server-side.
+
+| Input | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| `slug` | string | Yes | Public storefront slug to resolve. |
+
+> _"Show me the packages in the store at slug my-shop."_
 
 ---
 

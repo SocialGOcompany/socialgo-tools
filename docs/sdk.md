@@ -199,6 +199,17 @@ below.
 | `refill(order)`         | `refill`   | `Promise<{ refill: number \| string }>`       | Request a refill, returns the ticket id.  |
 | `cancel(orders)`        | `cancel`   | `Promise<Array<{ order: number; cancel: unknown }>>` | Cancel one or more orders.         |
 | `balance()`             | `balance`  | `Promise<SmmBalance>`                         | Current account balance.                  |
+| `wallet()`              | `wallet`   | `Promise<SmmWallet>`                          | Balance + recent ledger transactions.     |
+| `addFunds(params)`      | `add_funds` | `Promise<SmmAddFundsResult>`                 | Create a pending wallet top-up.           |
+| `massOrder(orders)`     | `mass_order` | `Promise<SmmMassOrderResult>`               | Place many orders in one call.            |
+| `subscriptionCreate(params)` | `subscription_create` | `Promise<SmmSubscriptionCreateResult>` | Create a recurring subscription.      |
+| `subscriptions()`       | `subscriptions` | `Promise<SmmSubscriptionListItem[]>`     | List recurring subscriptions.             |
+| `couponValidate(code)`  | `coupon_validate` | `Promise<SmmCouponPreview>`            | Preview a coupon without redeeming it.    |
+| `affiliateStats()`      | `affiliate_stats` | `Promise<SmmAffiliateStats>`           | The user's own affiliate numbers.         |
+| `loyaltyStatus()`       | `loyalty_status` | `Promise<SmmLoyaltyStatus>`             | The user's loyalty tier and points.       |
+| `recommend(params)`     | `recommend` | `Promise<SmmRecommendedService[]>`           | Recommend related services.               |
+| `campaignBuild(params)` | `campaign_build` | `Promise<SmmCampaignPlan>`              | Build a campaign plan (no order placed).  |
+| `storefront(slug)`      | `storefront` | `Promise<SmmStorefront>`                    | Resolve a public storefront by slug.      |
 
 ### `services(): Promise<SmmService[]>`
 
@@ -320,6 +331,111 @@ console.log(`Balance: ${balance} ${currency}`);
 ```
 
 **Returns:** [`SmmBalance`](#smmbalance) (`balance` is a string).
+
+### `wallet(): Promise<SmmWallet>`
+
+Richer than `balance()` (`action=wallet`): balance + currency plus the most recent ledger `transactions` (`SmmWalletTransaction[]`). No parameters.
+
+```ts
+const { balance, currency, transactions } = await client.wallet();
+```
+
+**Returns:** `SmmWallet`.
+
+### `addFunds(params: SmmAddFundsParams): Promise<SmmAddFundsResult>`
+
+Creates a **pending** wallet top-up (`action=add_funds`). Pass `{ amount, method }`. Balance is credited only after the payment confirms.
+
+```ts
+const payment = await client.addFunds({ amount: 50, method: "mercadopago" });
+```
+
+**Returns:** `SmmAddFundsResult` (`{ payment, status, amount, currency, method, message? }`).
+
+### `massOrder(orders: SmmMassOrderLine[] | string): Promise<SmmMassOrderResult>`
+
+Places **several** orders in one call (`action=mass_order`). Accepts a list of `{ service, link, quantity }` (serialized to the `service|link|quantity` CSV the protocol expects) or a raw CSV string. Each line is independent.
+
+```ts
+const result = await client.massOrder([
+  { service: 1234, link: "https://insta.com/a", quantity: 1000 },
+  { service: 55, link: "https://insta.com/b", quantity: 500 },
+]);
+```
+
+**Returns:** `SmmMassOrderResult` (`{ orders: [{ line, order }], errors: [{ line, reason }] }`).
+
+### `subscriptionCreate(params: SmmSubscriptionCreateParams): Promise<SmmSubscriptionCreateResult>`
+
+Creates a **recurring** subscription (`action=subscription_create`). Pass `{ service, link, quantity, runs, interval }` where `interval` is in **minutes**.
+
+```ts
+const sub = await client.subscriptionCreate({
+  service: 70, link: "https://insta.com/u", quantity: 100, runs: 30, interval: 1440,
+});
+```
+
+**Returns:** `SmmSubscriptionCreateResult`.
+
+### `subscriptions(): Promise<SmmSubscriptionListItem[]>`
+
+Lists the user's recurring subscriptions (`action=subscriptions`). No parameters.
+
+**Returns:** `SmmSubscriptionListItem[]`.
+
+### `couponValidate(code: string): Promise<SmmCouponPreview>`
+
+Validates / **previews** a coupon **without** redeeming it (`action=coupon_validate`). Read-only.
+
+```ts
+const preview = await client.couponValidate("WELCOME10");
+if (preview.valid) console.log(preview.kind, preview.value);
+```
+
+**Returns:** `SmmCouponPreview` (`{ valid, reason?, code?, kind?, value?, minAmount?, expiresAt? }`).
+
+### `affiliateStats(): Promise<SmmAffiliateStats>`
+
+Returns the user's **own** affiliate stats and referral link (`action=affiliate_stats`). Scoped to the API key's user.
+
+**Returns:** `SmmAffiliateStats`.
+
+### `loyaltyStatus(): Promise<SmmLoyaltyStatus>`
+
+Returns the user's loyalty tier, points and progress (`action=loyalty_status`). No parameters.
+
+**Returns:** `SmmLoyaltyStatus`.
+
+### `recommend(params?: SmmRecommendParams): Promise<SmmRecommendedService[]>`
+
+**Recommends** related services from an anchor `service` id and/or a `platform` (`action=recommend`). Each item carries a `reason` (`bought_together` | `same_platform` | `popular`).
+
+```ts
+const ideas = await client.recommend({ platform: "Instagram", limit: 5 });
+```
+
+**Returns:** `SmmRecommendedService[]`.
+
+### `campaignBuild(params: SmmCampaignBuildParams): Promise<SmmCampaignPlan>`
+
+**Builds a campaign plan** from `{ budget, days, service? | platform?, boost_type?, link? }` (`action=campaign_build`). Returns a reviewable plan — it does **not** place any order.
+
+```ts
+const plan = await client.campaignBuild({ budget: 100, days: 30, platform: "Instagram", boost_type: "followers" });
+if (plan.feasible) console.log(plan.totalQuantity, plan.totalCost, plan.schedule);
+```
+
+**Returns:** `SmmCampaignPlan`.
+
+### `storefront(slug: string): Promise<SmmStorefront>`
+
+Resolves a **public** storefront by `slug` and returns the store with its `packages` (`action=storefront`). The package `price` is a reference; the charged amount is recomputed server-side.
+
+```ts
+const store = await client.storefront("my-shop");
+```
+
+**Returns:** `SmmStorefront`.
 
 ---
 

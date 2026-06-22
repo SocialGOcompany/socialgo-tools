@@ -25,6 +25,22 @@
  *   - refill_status  → socialgo_refill_status
  *   - cancel         → socialgo_cancel
  *   - orders (ext.)  → socialgo_orders
+ *   - wallet (ext.)  → socialgo_wallet
+ *   - add_funds      → socialgo_add_funds
+ *   - mass_order     → socialgo_mass_order
+ *   - subscription_create → socialgo_create_subscription
+ *   - subscriptions  → socialgo_subscriptions
+ *   - coupon_validate → socialgo_validate_coupon
+ *   - affiliate_stats → socialgo_affiliate_stats
+ *   - loyalty_status → socialgo_loyalty_status
+ *   - recommend      → socialgo_recommend
+ *   - campaign_build → socialgo_build_campaign
+ *   - storefront     → socialgo_storefront
+ *
+ * Cada tool dispara o `action` correspondente do protocolo SMM v2 — o MESMO que o
+ * `@socialgo/sdk` (SmmV2Client) expõe método a método (massOrder, subscriptionCreate,
+ * couponValidate, affiliateStats, loyaltyStatus, recommend, campaignBuild, storefront…).
+ * Todas as extensões são ESCOPADAS ao userId da `key` (dados do PRÓPRIO usuário).
  *
  * ── Transporte ──────────────────────────────────────────────────────────────
  * Toda tool fala com a API do SocialGO via HTTP, no MESMO protocolo SMM API v2
@@ -740,6 +756,307 @@ export async function registerTools(server: McpServer): Promise<void> {
         return ok(
           await guest("GET", `/guest/order/${encodeURIComponent(id)}?${qs.toString()}`),
         );
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────────────── 12) socialgo_wallet ──────────────────────────── */
+  // Saldo + extrato recente da carteira do PRÓPRIO usuário (action=wallet).
+  server.tool(
+    "socialgo_wallet",
+    "Returns the account wallet for the current API user: current `balance` + `currency` plus the most " +
+      "recent ledger `transactions` ({ id, type, amount, balanceAfter, description, createdAt }). " +
+      "Use this for a richer view than socialgo_balance (which is balance-only) — e.g. to explain recent " +
+      "deposits/charges. Scoped to the userId of the API key.",
+    {},
+    async () => {
+      try {
+        return ok(await smm("wallet"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────────────── 13) socialgo_add_funds ───────────────────────── */
+  // Cria um pagamento PENDENTE para recarregar a carteira (action=add_funds).
+  // Não credita saldo direto — devolve o pagamento a concluir no painel.
+  server.tool(
+    "socialgo_add_funds",
+    "Creates a PENDING payment to top up the current user's wallet and returns the payment to be completed " +
+      "in the panel ({ payment, status, amount, currency, method, message }). This does NOT add balance " +
+      "immediately — funds only land after the payment confirms. Use socialgo_guest_gateways to confirm which " +
+      "payment methods are currently active before choosing one. Scoped to the userId of the API key.",
+    {
+      amount: z
+        .number()
+        .positive()
+        .describe("Amount to add to the wallet, in the account currency."),
+      method: z
+        .enum([
+          "mercadopago",
+          "stripe",
+          "crypto",
+          "manual",
+          "paypal",
+          "paytm",
+          "cryptomus",
+          "cardinity",
+          "binance_pay",
+        ])
+        .describe("Payment gateway to use. Prefer one returned active by socialgo_guest_gateways."),
+    },
+    async ({ amount, method }) => {
+      try {
+        return ok(await smm("add_funds", { amount, method }));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────────────── 14) socialgo_mass_order ──────────────────────── */
+  // Vários pedidos numa única chamada (action=mass_order). Cada linha é
+  // independente — uma falha não derruba as demais. Transporte CSV
+  // `service|link|quantity` (uma linha por pedido), como o SDK serializa.
+  server.tool(
+    "socialgo_mass_order",
+    "Places SEVERAL orders in a single call. Pass `orders` as a list of { service, link, quantity }. " +
+      "Each line is independent — a failing line does NOT cancel the others. " +
+      "Returns { orders: [{ line, order }], errors: [{ line, reason }] }. " +
+      "Use socialgo_services first to resolve each `service` id. Charges are debited from the account balance. " +
+      "Scoped to the userId of the API key.",
+    {
+      orders: z
+        .array(
+          z.object({
+            service: z
+              .union([z.number(), z.string()])
+              .describe("Service id (from socialgo_services)."),
+            link: z.string().min(1).describe("Target link (profile, post, video, etc)."),
+            quantity: z
+              .number()
+              .int()
+              .positive()
+              .describe("Desired quantity, within the service min/max."),
+          }),
+        )
+        .min(1)
+        .describe("List of orders to create in one batch."),
+    },
+    async ({ orders }) => {
+      try {
+        // Serializa para o CSV `service|link|quantity` que o protocolo aceita
+        // (transporte form-urlencoded). O servidor faz o parse linha a linha.
+        const csv = orders.map((o) => `${o.service}|${o.link}|${o.quantity}`).join("\n");
+        return ok(await smm("mass_order", { orders: csv }));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 15) socialgo_create_subscription ──────────────────────── */
+  // Assinatura recorrente do PRÓPRIO usuário (action=subscription_create).
+  server.tool(
+    "socialgo_create_subscription",
+    "Creates a RECURRING subscription for the current user (auto re-orders a service on a fixed cadence). " +
+      "Pass `service`, `link`, `quantity` per run, total `runs`, and `interval` in MINUTES between runs. " +
+      "Returns { subscription, status, runs, remaining_runs, interval, next_run }. " +
+      "Differs from drip-feed (a single fractioned order): a subscription is an ongoing schedule. " +
+      "Use socialgo_subscriptions to list existing ones. Scoped to the userId of the API key.",
+    {
+      service: z
+        .union([z.number(), z.string()])
+        .describe("Service id (from socialgo_services)."),
+      link: z.string().min(1).describe("Target link (profile, post, video, etc)."),
+      quantity: z
+        .number()
+        .int()
+        .positive()
+        .describe("Quantity ordered on EACH run, within the service min/max."),
+      runs: z.number().int().positive().describe("Total number of recurring runs."),
+      interval: z
+        .number()
+        .int()
+        .positive()
+        .describe("Interval in MINUTES between each run."),
+    },
+    async ({ service, link, quantity, runs, interval }) => {
+      try {
+        return ok(await smm("subscription_create", { service, link, quantity, runs, interval }));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────────────── 16) socialgo_subscriptions ───────────────────── */
+  server.tool(
+    "socialgo_subscriptions",
+    "Lists the current user's recurring subscriptions ({ subscription, service, link, status, quantity, " +
+      "runs, remaining_runs, interval, next_run, created_at }). " +
+      "Use to review active/finished subscriptions created via socialgo_create_subscription. " +
+      "Scoped to the userId of the API key.",
+    {},
+    async () => {
+      try {
+        return ok(await smm("subscriptions"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────────────── 17) socialgo_validate_coupon ─────────────────── */
+  // Apenas valida/preview — NÃO resgata o cupom (action=coupon_validate).
+  server.tool(
+    "socialgo_validate_coupon",
+    "Validates / previews a coupon code WITHOUT redeeming it. " +
+      "Returns { valid, reason?, code?, kind?, value?, minAmount?, expiresAt? } — `kind` is 'deposit_bonus' " +
+      "(percentage) or 'wallet_credit' (fixed credit). When `valid` is false, `reason` explains why. " +
+      "This is read-only: it never applies the coupon, only checks it.",
+    {
+      code: z.string().min(1).describe("Coupon code to validate (case-insensitive)."),
+    },
+    async ({ code }) => {
+      try {
+        return ok(await smm("coupon_validate", { code }));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────────────── 18) socialgo_affiliate_stats ─────────────────── */
+  server.tool(
+    "socialgo_affiliate_stats",
+    "Returns the current user's OWN affiliate stats and referral link: { referral_code, referral_link, " +
+      "affiliate_balance, enabled, commission_percent, level2_percent, minimum_payout, referrals_count, " +
+      "level2_count, total_earned, earned_l1, earned_l2 }. " +
+      "Scoped to the userId of the API key — never exposes other users' data.",
+    {},
+    async () => {
+      try {
+        return ok(await smm("affiliate_stats"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────────────── 19) socialgo_loyalty_status ──────────────────── */
+  server.tool(
+    "socialgo_loyalty_status",
+    "Returns the current user's loyalty status: { tier, label, next_threshold, progress_pct, points_balance, " +
+      "lifetime_spent, currency }. Use to tell the user their tier and how close they are to the next one. " +
+      "Scoped to the userId of the API key.",
+    {},
+    async () => {
+      try {
+        return ok(await smm("loyalty_status"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────────────── 20) socialgo_recommend ───────────────────────── */
+  // Recomendações por serviço-âncora e/ou plataforma (action=recommend).
+  server.tool(
+    "socialgo_recommend",
+    "Recommends related services given an anchor `service` id and/or a `platform`. " +
+      "Returns a ranked list of { service, name, category, platform, rate, min, max, refill, reason } where " +
+      "`reason` is 'bought_together' | 'same_platform' | 'popular'. " +
+      "Use to suggest cross-sells/next steps after a user shows interest in a service or platform.",
+    {
+      service: z
+        .union([z.number(), z.string()])
+        .optional()
+        .describe("Anchor service id to recommend around (from socialgo_services)."),
+      platform: z
+        .string()
+        .optional()
+        .describe("Platform to recommend for, e.g. 'Instagram', 'TikTok', 'YouTube'."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(50)
+        .optional()
+        .describe("Max recommendations to return (1-50)."),
+    },
+    async ({ service, platform, limit }) => {
+      try {
+        return ok(await smm("recommend", { service, platform, limit }));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────────────── 21) socialgo_build_campaign ──────────────────── */
+  // Devolve um PLANO de campanha — NÃO cria pedido sozinho (action=campaign_build).
+  server.tool(
+    "socialgo_build_campaign",
+    "Builds a campaign PLAN from a budget, a goal and a delivery window — it does NOT place any order, it only " +
+      "returns the proposed plan for review. " +
+      "Provide `budget` and `days`, plus a target via `service` id OR `platform` (+ optional `boost_type`) and " +
+      "optional `link`. Returns { feasible, reason?, service?, totalQuantity?, totalCost?, runs?, " +
+      "intervalMinutes?, schedule?, params }. After reviewing, the user can execute it via socialgo_place_order " +
+      "(drip-feed using runs+interval) or socialgo_create_subscription.",
+    {
+      budget: z
+        .number()
+        .positive()
+        .describe("Total budget for the campaign, in the account currency."),
+      days: z
+        .number()
+        .int()
+        .positive()
+        .describe("Delivery window in DAYS for gradual rollout."),
+      service: z
+        .union([z.number(), z.string()])
+        .optional()
+        .describe("Target service id (from socialgo_services). Provide this OR `platform`."),
+      platform: z
+        .string()
+        .optional()
+        .describe("Target platform, e.g. 'Instagram', 'TikTok'. Used when no `service` id is given."),
+      boost_type: z
+        .string()
+        .optional()
+        .describe("Optional boost type to bias service selection, e.g. 'followers', 'likes', 'views'."),
+      link: z
+        .string()
+        .optional()
+        .describe("Optional target link (profile/post/video) the plan should boost."),
+    },
+    async ({ budget, days, service, platform, boost_type, link }) => {
+      try {
+        return ok(await smm("campaign_build", { budget, days, service, platform, boost_type, link }));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────────────── 22) socialgo_storefront ──────────────────────── */
+  // Resolve uma loja pública pelo slug → pacotes (action=storefront).
+  server.tool(
+    "socialgo_storefront",
+    "Resolves a public storefront by its `slug` and returns the store with its packages: " +
+      "{ slug, title, description, theme, locale, packages: [{ id, title, description, quantity, price, " +
+      "serviceName }] }. The displayed package `price` is a reference — the charged amount is recomputed " +
+      "server-side. Use to show a public store's offered packages to a user.",
+    {
+      slug: z.string().min(1).describe("Public storefront slug to resolve."),
+    },
+    async ({ slug }) => {
+      try {
+        return ok(await smm("storefront", { slug }));
       } catch (err) {
         return fail(err);
       }

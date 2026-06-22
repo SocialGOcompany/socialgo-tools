@@ -4,10 +4,13 @@
 
 # Tell Claude what you want. It runs your SMM panel.
 
-### The first MCP server + CLI for an SMM platform — the AI-native way to run social-media-marketing.
+### The first MCP server + CLI for a Social Media Marketing (SMM) platform — the AI-native way to run social media marketing.
 
 Browse the catalog, place and track orders, and manage your balance straight from **Claude** (and Cursor, Cline, Windsurf, VS Code), from your **terminal**, or from your **own code**. No clicking around a legacy PHP panel.
 
+[![@socialgo/cli on npm](https://img.shields.io/npm/v/@socialgo/cli?logo=npm&label=%40socialgo%2Fcli&color=cb3837)](https://www.npmjs.com/package/@socialgo/cli)
+[![@socialgo/mcp on npm](https://img.shields.io/npm/v/@socialgo/mcp?logo=npm&label=%40socialgo%2Fmcp&color=cb3837)](https://www.npmjs.com/package/@socialgo/mcp)
+[![@socialgo/sdk on npm](https://img.shields.io/npm/v/@socialgo/sdk?logo=npm&label=%40socialgo%2Fsdk&color=cb3837)](https://www.npmjs.com/package/@socialgo/sdk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./CONTRIBUTING.md)
 [![CI](https://github.com/SocialGOcompany/socialgo-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/SocialGOcompany/socialgo-tools/actions/workflows/ci.yml)
@@ -71,6 +74,8 @@ Everything is one core wearing three faces. Pick the surface that fits how you w
 | [**`@socialgo/sdk`**](./packages/sdk) | TypeScript client for the **social media marketing API** — typed models, a fetch-based client, and pricing/markup helpers. | [SDK docs](./docs/sdk.md) |
 
 The clever part is the MCP server's **search-then-act** design. A panel can carry thousands of services. Registering one tool per service would blow up the model's context. Instead the server exposes a small, fixed set of tools, anchored by `socialgo_services`: the assistant searches by intent ("cheap Instagram followers"), gets back only the relevant services with IDs and prices, then acts on the one it picked. The tool count stays constant no matter how big the catalog gets.
+
+Beyond find-and-order, the assistant can now plan and grow: `socialgo_recommend` proposes the natural next service from an anchor or platform, `socialgo_build_campaign` turns a budget and a delivery window into a reviewable plan before anything is charged, `socialgo_storefront` reads a public store's packages by slug, and `socialgo_add_funds` starts a wallet top-up. And the whole conversation works in any language — ask in English, Portuguese or Spanish and the assistant narrates the data back in the language you used.
 
 ---
 
@@ -139,6 +144,19 @@ A small, fixed toolset — the complete list the server registers, straight from
 | `socialgo_cancel` | Cancel one or more orders by id (when the service allows it). |
 | `socialgo_orders` | List the account's order history (id, charge, status, start_count, remains, link, quantity, created_at). |
 | `socialgo_balance` | Current account balance (balance + currency). Use before ordering to confirm funds. |
+| `socialgo_wallet` | Richer than `socialgo_balance`: balance + currency plus the most recent ledger transactions (deposits, charges) so the assistant can explain recent activity. |
+| `socialgo_add_funds` | Create a **pending** wallet top-up for an `amount` via a `method`, and return the payment to finish in the panel. Balance lands only after the payment confirms. |
+| `socialgo_mass_order` | Place **several** orders in one call from a list of `{ service, link, quantity }`. Each line is independent — one failure doesn't cancel the rest. |
+| `socialgo_create_subscription` | Set up a **recurring** subscription: re-order a service every `interval` minutes for a total number of `runs`. An ongoing schedule, distinct from a single drip-feed order. |
+| `socialgo_subscriptions` | List the user's recurring subscriptions with status, remaining runs, interval and next run. |
+| `socialgo_validate_coupon` | **Preview** a coupon code without redeeming it: validity, kind (deposit bonus / wallet credit), value, minimum and expiry. Read-only. |
+| `socialgo_affiliate_stats` | The user's own referral link and affiliate numbers (code, balance, commission rates, referral counts, total earned). Scoped to the API key. |
+| `socialgo_loyalty_status` | The user's loyalty tier, points, lifetime spend and progress toward the next tier. |
+| `socialgo_recommend` | **Recommend** related services from an anchor `service` id and/or a `platform` — a ranked list with a `reason` (bought together, same platform, popular). The natural cross-sell. |
+| `socialgo_build_campaign` | **Build a campaign plan** from a `budget`, a goal and a delivery window in `days`. Returns a reviewable plan (quantity, cost, schedule) — it does **not** place any order. |
+| `socialgo_storefront` | Resolve a public **storefront** by `slug` and return the store with its offered packages (title, quantity, reference price). |
+
+> Works in any language. Ask in English, Portuguese, Spanish or anything else — the assistant reads the figures back to you in the language you used.
 
 ### Guest mode (no account, no API key)
 
@@ -169,8 +187,18 @@ The `socialgo` command covers the whole reseller flow. Add `--json` to any comma
 | `socialgo order cancel <ids...>` | Cancel one or more orders. |
 | `socialgo refill-status --refill <id>` / `--order <id>` | Status of a refill. |
 | `socialgo orders` | List your order history. |
+| `socialgo mass-order --line "<s\|l\|q>"` / `--file <csv>` | Place several orders in one call from inline lines or a `service|link|quantity` CSV; each line is independent. |
 | `socialgo wallet` | Balance plus recent transactions. |
 | `socialgo add-funds --amount <v> --method <gateway>` | Create a pending top-up payment (finish it in the panel). |
+| `socialgo subscription create --service <id> --link <url> --quantity <n> --runs <n> --interval <min>` | Set up a recurring subscription: N runs every X minutes. |
+| `socialgo subscription list` | List your recurring subscriptions. |
+| `socialgo coupon validate <code>` | Preview a coupon (validity, kind, value, expiry) without redeeming it. |
+| `socialgo affiliate stats` | Your affiliate numbers (referral code/link, balance, commissions, referrals). |
+| `socialgo affiliate link` | Print just your referral link and code. |
+| `socialgo loyalty` | Your loyalty tier, points and progress to the next tier. |
+| `socialgo recommend <serviceId\|platform>` | Recommended services from an anchor service and/or a platform. |
+| `socialgo campaign build --budget <v> --days <n> [--platform p \| --service id] [--goal g]` | Build a campaign plan (quantity, cost, schedule) — does not place an order. |
+| `socialgo storefront <slug>` | Resolve a public storefront by slug and list its packages. |
 | `socialgo guest-gateways` | List the panel's active payment gateways. |
 | `socialgo guest-services [--platform p] [--q term]` | Browse the public catalog (no key) to find a `serviceId`. |
 | `socialgo guest-order <serviceId> --email <e> --link <url> [--quantity n] [--method g]` | Create a no-account order; returns a payment URL. |
@@ -245,7 +273,7 @@ const sellRate = applyMarkup(0.9, { multiplier: 1.5 }); // supplier rate per 1,0
 const cost = orderCost(sellRate, 1000);                 // cost for a 1,000-unit order
 ```
 
-The client also exposes `multiStatus`, `refill`, `cancel` and `balance`; the SDK exports `resolveMarkup` for cascading category overrides. See the full [SDK reference](./docs/sdk.md).
+The client also exposes `multiStatus`, `refill`, `cancel` and `balance`, plus the newer `wallet`, `addFunds`, `massOrder`, `subscriptionCreate`, `subscriptions`, `couponValidate`, `affiliateStats`, `loyaltyStatus`, `recommend`, `campaignBuild` and `storefront` methods; the SDK exports `resolveMarkup` for cascading category overrides. See the full [SDK reference](./docs/sdk.md).
 
 ---
 

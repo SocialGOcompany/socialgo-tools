@@ -18,6 +18,54 @@ This is a monorepo; the three packages (`@socialgo/sdk`, `@socialgo/cli`,
 
 See [ROADMAP.md](./ROADMAP.md) for the broader direction.
 
+## [0.2.0] - 2026-06-22
+
+Adds recurring delivery, wallet top-ups, batch ordering, coupons, affiliate and
+loyalty read-outs, intent-based recommendations, budget-driven campaign planning,
+and public storefront lookups — across all three surfaces (SDK, CLI, MCP).
+
+### Added
+
+#### `@socialgo/sdk`
+
+- `SmmV2Client` gains `wallet` (balance + recent ledger transactions), `addFunds`
+  (create a pending wallet top-up), `massOrder` (place several orders in one call),
+  `subscriptionCreate` and `subscriptions` (recurring scheduled delivery),
+  `couponValidate` (preview a coupon without redeeming it), `affiliateStats` and
+  `loyaltyStatus` (the current user's referral and loyalty figures), `recommend`
+  (related services from an anchor service and/or platform), `campaignBuild`
+  (turn a budget + window + goal into a delivery plan, no order placed) and
+  `storefront` (resolve a public store by slug with its packages).
+- Typed models for the new responses: wallet/transactions, add-funds result,
+  mass-order result, subscription create/list, coupon preview, affiliate stats,
+  loyalty status, recommended service, campaign plan and storefront/packages.
+
+#### `@socialgo/cli`
+
+- New commands: `wallet`, `add-funds`, `order mass-order` (batch from a list or
+  file), `subscription create`, `subscription list`, `coupon validate`,
+  `affiliate stats`, `affiliate link`, `loyalty`, `recommend`, `campaign build`
+  and `storefront <slug>`. All accept `--json` for script-friendly output.
+
+#### `@socialgo/mcp`
+
+- New tools: `socialgo_wallet`, `socialgo_add_funds`, `socialgo_mass_order`,
+  `socialgo_create_subscription`, `socialgo_subscriptions`,
+  `socialgo_validate_coupon`, `socialgo_affiliate_stats`,
+  `socialgo_loyalty_status`, `socialgo_recommend`, `socialgo_build_campaign`
+  and `socialgo_storefront`.
+- `socialgo_recommend` suggests next services from an anchor or platform;
+  `socialgo_build_campaign` returns a reviewable delivery plan from a budget and
+  window without placing an order; `socialgo_storefront` reads a public store's
+  packages; `socialgo_add_funds` starts a pending wallet top-up. The conversation
+  works in any language — the assistant reads the data back in the user's own
+  language.
+
+### Security
+
+- Credentials are still read only from the environment; no upstream supplier is
+  referenced. New wallet and affiliate read-outs are scoped to the API key's user.
+
 ## [0.1.0] - 2026-06-22
 
 Initial public release of the SocialGO open-source toolkit: a typed core plus three
@@ -79,5 +127,6 @@ surfaces (library, CLI, AI tools) over the standard SMM API v2 protocol
   `SOCIALGO_API_KEY`) — never hardcoded. Guest-checkout endpoints never send a key.
 - No upstream SMM supplier is referenced anywhere in the code.
 
-[Unreleased]: https://github.com/SocialGOcompany/socialgo-tools/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/SocialGOcompany/socialgo-tools/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/SocialGOcompany/socialgo-tools/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/SocialGOcompany/socialgo-tools/releases/tag/v0.1.0

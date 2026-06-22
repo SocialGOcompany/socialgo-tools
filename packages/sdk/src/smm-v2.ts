@@ -14,7 +14,20 @@ export type SmmAction =
   | "refill"
   | "refill_status"
   | "cancel"
-  | "balance";
+  | "balance"
+  // extensões SocialGO (além do SMM v2 padrão) — mesmo endpoint POST {key, action}
+  | "orders"
+  | "wallet"
+  | "add_funds"
+  | "mass_order"
+  | "subscription_create"
+  | "subscriptions"
+  | "coupon_validate"
+  | "affiliate_stats"
+  | "loyalty_status"
+  | "recommend"
+  | "campaign_build"
+  | "storefront";
 
 /** Item de serviço como o fornecedor devolve em `action=services`. */
 export interface SmmService {
@@ -60,6 +73,237 @@ export interface SmmOrderStatus {
 export interface SmmBalance {
   balance: string;
   currency: string;
+}
+
+/* ─────────────── tipos das extensões SocialGO (aditivos) ─────────────── */
+
+/** Item do histórico de pedidos (`action=orders`). */
+export interface SmmOrderListItem {
+  order: number | string;
+  charge: string;
+  status: SmmOrderStatus["status"];
+  start_count: string;
+  remains: string;
+  link: string;
+  quantity: number;
+  created_at: string;
+}
+
+/** Lançamento do extrato da carteira (`action=wallet`). */
+export interface SmmWalletTransaction {
+  id: string;
+  type: string;
+  amount: string;
+  balanceAfter: string;
+  description: string | null;
+  createdAt: string;
+}
+
+/** Saldo + extrato recente do revendedor (`action=wallet`). */
+export interface SmmWallet {
+  balance: string;
+  currency: string;
+  transactions: SmmWalletTransaction[];
+}
+
+/** Parâmetros de `action=add_funds` — cria um pagamento pendente. */
+export interface SmmAddFundsParams {
+  amount: number;
+  method:
+    | "mercadopago"
+    | "stripe"
+    | "crypto"
+    | "manual"
+    | "paypal"
+    | "paytm"
+    | "cryptomus"
+    | "cardinity"
+    | "binance_pay";
+}
+
+/** Resposta de `action=add_funds`. */
+export interface SmmAddFundsResult {
+  payment: string;
+  status: string;
+  amount: string;
+  currency: string;
+  method: SmmAddFundsParams["method"];
+  message: string;
+}
+
+/** Uma linha estruturada do `action=mass_order`. */
+export interface SmmMassOrderLine {
+  service: number | string;
+  link: string;
+  quantity: number;
+}
+
+/**
+ * Resposta de `action=mass_order` — pedidos criados + erros por linha.
+ * Uma linha que falha não derruba as demais.
+ */
+export interface SmmMassOrderResult {
+  orders: Array<{ line: number; order: number | string }>;
+  errors: Array<{ line: number; reason: string }>;
+}
+
+/** Parâmetros de `action=subscription_create` — assinatura recorrente do user. */
+export interface SmmSubscriptionCreateParams {
+  service: number | string;
+  link: string;
+  quantity: number;
+  runs: number;
+  /** Intervalo entre ciclos em MINUTOS. */
+  interval: number;
+}
+
+/** Resposta de `action=subscription_create`. */
+export interface SmmSubscriptionCreateResult {
+  subscription: string;
+  status: string;
+  runs: number;
+  remaining_runs: number;
+  interval: number;
+  next_run: string | null;
+}
+
+/** Item de `action=subscriptions` — assinatura do próprio usuário. */
+export interface SmmSubscriptionListItem {
+  subscription: string;
+  service: number | string;
+  link: string;
+  status: string;
+  quantity: number;
+  runs: number;
+  remaining_runs: number;
+  interval: number;
+  next_run: string | null;
+  created_at: string;
+}
+
+/**
+ * Resposta de `action=coupon_validate` — validação/preview (NÃO resgata).
+ * Quando `valid=false`, `reason` traz o motivo legível.
+ */
+export interface SmmCouponPreview {
+  valid: boolean;
+  reason?: string;
+  code?: string;
+  kind?: "deposit_bonus" | "wallet_credit";
+  /** deposit_bonus = percentual; wallet_credit = valor fixo creditado. */
+  value?: string;
+  minAmount?: string | null;
+  expiresAt?: string | null;
+}
+
+/** Resposta de `action=affiliate_stats` — stats + link DO PRÓPRIO user. */
+export interface SmmAffiliateStats {
+  referral_code: string;
+  referral_link: string;
+  affiliate_balance: string;
+  enabled: boolean;
+  commission_percent: number;
+  level2_percent: number;
+  minimum_payout: number;
+  referrals_count: number;
+  level2_count: number;
+  total_earned: string;
+  earned_l1: string;
+  earned_l2: string;
+}
+
+/** Resposta de `action=loyalty_status` — tier/pontos DO próprio user. */
+export interface SmmLoyaltyStatus {
+  tier: "new" | "frequent" | "vip" | "elite" | string;
+  label: string;
+  next_threshold: number | null;
+  progress_pct: number;
+  points_balance: number;
+  lifetime_spent: string;
+  currency: string;
+}
+
+/** Parâmetros de `action=recommend` — serviço-âncora e/ou plataforma. */
+export interface SmmRecommendParams {
+  service?: number | string;
+  platform?: string;
+  limit?: number;
+}
+
+/** Item recomendado (`action=recommend`). */
+export interface SmmRecommendedService {
+  service: number | string;
+  name: string;
+  category: string;
+  platform: string | null;
+  rate: string;
+  min: string;
+  max: string;
+  refill: boolean;
+  reason: "bought_together" | "same_platform" | "popular" | string;
+}
+
+/** Parâmetros de `action=campaign_build` — devolve um PLANO (não cria pedido). */
+export interface SmmCampaignBuildParams {
+  service?: number | string;
+  platform?: string;
+  boost_type?: string;
+  link?: string;
+  budget: number;
+  /** Janela de entrega gradual em dias. */
+  days: number;
+}
+
+/** Uma execução do cronograma do plano de campanha. */
+export interface SmmCampaignScheduleEntry {
+  run: number;
+  quantity: number;
+  dayOffset: number;
+}
+
+/** PLANO de campanha (`action=campaign_build`) — proposta para revisão. */
+export interface SmmCampaignPlan {
+  feasible: boolean;
+  reason?: "no_service" | "budget_too_low" | "invalid_input" | string;
+  service?: {
+    id: number | string;
+    name: string;
+    platform: string | null;
+    serviceTag: string | null;
+  };
+  totalQuantity?: number;
+  totalCost?: number;
+  runs?: number;
+  intervalMinutes?: number;
+  schedule?: SmmCampaignScheduleEntry[];
+  params: {
+    platform?: string;
+    boostType?: string;
+    serviceId?: number | string;
+    budget: number;
+    days: number;
+  };
+}
+
+/** Pacote público de uma storefront (`action=storefront`). */
+export interface SmmStorefrontPackage {
+  id: string;
+  title: string;
+  description: string | null;
+  quantity: number;
+  /** Preço de campanha EXIBIDO (referência); o cobrado é recalculado no servidor. */
+  price: string;
+  serviceName: string | null;
+}
+
+/** Loja pública resolvida pelo slug (`action=storefront`). */
+export interface SmmStorefront {
+  slug: string;
+  title: string;
+  description: string | null;
+  theme: string;
+  locale: string;
+  packages: SmmStorefrontPackage[];
 }
 
 export interface SmmV2ClientOptions {
@@ -125,7 +369,12 @@ export class SmmV2Client {
     return this.call<SmmService[]>("services");
   }
 
-  /** Cria um pedido. Retorna `{ order }`. */
+  /**
+   * Cria um pedido. Retorna `{ order }`.
+   *
+   * Drip-feed: passe `runs` + `interval` (intervalo em minutos) para fracionar a
+   * entrega em N execuções — só em serviços com `dripfeed: true`.
+   */
   add(params: SmmAddOrderParams): Promise<{ order: number }> {
     return this.call<{ order: number }>("add", params as unknown as Record<string, unknown>);
   }
@@ -153,5 +402,104 @@ export class SmmV2Client {
   /** Saldo atual no fornecedor. */
   balance(): Promise<SmmBalance> {
     return this.call<SmmBalance>("balance");
+  }
+
+  /**
+   * Status de UMA reposição. Aceita o id da linha de refill (`refill`) OU o id do
+   * pedido (`order`, pega a reposição mais recente daquele pedido). Resposta:
+   * `{ status }` ou `{ error }`.
+   */
+  refillStatus(ref: { refill: number | string } | { order: number | string }): Promise<
+    { status: string } | { error: string }
+  > {
+    return this.call<{ status: string } | { error: string }>(
+      "refill_status",
+      ref as Record<string, unknown>,
+    );
+  }
+
+  /* ─────────────── extensões SocialGO (escopadas ao userId da key) ─────────────── */
+
+  /** Histórico de pedidos do próprio revendedor. */
+  orders(): Promise<SmmOrderListItem[]> {
+    return this.call<SmmOrderListItem[]>("orders");
+  }
+
+  /** Saldo + extrato recente da carteira do revendedor. */
+  wallet(): Promise<SmmWallet> {
+    return this.call<SmmWallet>("wallet");
+  }
+
+  /** Cria um pagamento pendente para recarregar a carteira (conclui no painel). */
+  addFunds(params: SmmAddFundsParams): Promise<SmmAddFundsResult> {
+    return this.call<SmmAddFundsResult>("add_funds", params as unknown as Record<string, unknown>);
+  }
+
+  /**
+   * Vários pedidos numa chamada. Aceita uma LISTA estruturada de linhas OU um
+   * texto CSV (`service|link|quantity`, uma linha por pedido). Cada linha é
+   * independente — uma falha não derruba as demais.
+   *
+   * A lista estruturada é serializada para o formato CSV `service|link|quantity`
+   * (uma linha por pedido) porque o transporte é form-urlencoded; o servidor faz
+   * o parse linha a linha (linhas inválidas viram erros, sem derrubar as demais).
+   */
+  massOrder(orders: SmmMassOrderLine[] | string): Promise<SmmMassOrderResult> {
+    const csv =
+      typeof orders === "string"
+        ? orders
+        : orders.map((o) => `${o.service}|${o.link}|${o.quantity}`).join("\n");
+    return this.call<SmmMassOrderResult>("mass_order", { orders: csv });
+  }
+
+  /** Cria uma assinatura recorrente do próprio usuário. */
+  subscriptionCreate(
+    params: SmmSubscriptionCreateParams,
+  ): Promise<SmmSubscriptionCreateResult> {
+    return this.call<SmmSubscriptionCreateResult>(
+      "subscription_create",
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  /** Lista as assinaturas do próprio usuário. */
+  subscriptions(): Promise<SmmSubscriptionListItem[]> {
+    return this.call<SmmSubscriptionListItem[]>("subscriptions");
+  }
+
+  /** Valida/preview um cupom (NÃO resgata). */
+  couponValidate(code: string): Promise<SmmCouponPreview> {
+    return this.call<SmmCouponPreview>("coupon_validate", { code });
+  }
+
+  /** Stats + link de afiliado do PRÓPRIO usuário. */
+  affiliateStats(): Promise<SmmAffiliateStats> {
+    return this.call<SmmAffiliateStats>("affiliate_stats");
+  }
+
+  /** Tier/pontos do PRÓPRIO usuário. */
+  loyaltyStatus(): Promise<SmmLoyaltyStatus> {
+    return this.call<SmmLoyaltyStatus>("loyalty_status");
+  }
+
+  /** Serviços recomendados por serviço-âncora e/ou plataforma. */
+  recommend(params: SmmRecommendParams = {}): Promise<SmmRecommendedService[]> {
+    return this.call<SmmRecommendedService[]>(
+      "recommend",
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  /** Devolve um PLANO de campanha (não cria pedido sozinho). */
+  campaignBuild(params: SmmCampaignBuildParams): Promise<SmmCampaignPlan> {
+    return this.call<SmmCampaignPlan>(
+      "campaign_build",
+      params as unknown as Record<string, unknown>,
+    );
+  }
+
+  /** Resolve uma loja pública pelo slug → pacotes. */
+  storefront(slug: string): Promise<SmmStorefront> {
+    return this.call<SmmStorefront>("storefront", { slug });
   }
 }

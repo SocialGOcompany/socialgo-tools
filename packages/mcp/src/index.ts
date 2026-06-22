@@ -18,7 +18,7 @@ import { registerTools } from "./tools.js";
 async function main(): Promise<void> {
   const server = new McpServer({
     name: "socialgo-mcp",
-    version: "0.1.0",
+    version: "0.2.0",
   });
 
   await registerTools(server);

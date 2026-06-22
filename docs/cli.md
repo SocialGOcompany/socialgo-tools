@@ -67,7 +67,7 @@ Throughout this document, examples are written as `socialgo <command>`. If you h
 
 ```bash
 socialgo --help
-socialgo --version      # prints 0.1.0
+socialgo --version      # prints 0.2.0
 ```
 
 ---
@@ -129,6 +129,16 @@ Add `--json` to any command to get the raw API response as pretty-printed JSON i
 | `order cancel <ids...>`       | API key       | Cancel one or more orders.                                          |
 | `refill-status`               | API key       | Status of a refill, by `--refill <id>` or `--order <id>`.           |
 | `orders`                      | API key       | List your reseller order history.                                   |
+| `mass-order`                  | API key       | Place many orders in one call (`--line` or `--file`; per-line errors don't block the rest). |
+| `subscription create`         | API key       | Create a recurring subscription (scheduled drip-feed).              |
+| `subscription list`           | API key       | List your subscriptions.                                            |
+| `coupon validate <code>`      | API key       | Validate/preview a coupon (does **not** redeem).                    |
+| `affiliate stats`             | API key       | Your affiliate numbers (referrals, commissions, balance).          |
+| `affiliate link`              | API key       | Just your referral link + code.                                     |
+| `loyalty`                     | API key       | Your loyalty tier and points.                                      |
+| `recommend <serviceId\|platform>` | API key   | Recommended services from an anchor service and/or platform.        |
+| `campaign build`              | API key       | Build a campaign **plan** from budget/goal/days (does not place orders). |
+| `storefront <slug>`           | API key       | Resolve a public storefront by slug → packages.                     |
 | `balance`                     | API key       | Show account balance.                                               |
 | `wallet`                      | API key       | Wallet summary (balance + recent transactions when available).      |
 | `add-funds`                   | API key       | Create a pending top-up payment (completed in the panel).           |
@@ -455,6 +465,203 @@ ID     STATUS       CARGA   QTD  RESTANTE  LINK
 ```
 
 Columns: `ID`, `STATUS`, `CARGA` (charge), `QTD` (quantity), `RESTANTE` (remaining), `LINK` (truncated at 44 chars in the table). With `--json`, the full untruncated array is printed.
+
+---
+
+### `mass-order`
+
+Places **several** orders in a single call. Each line is independent — a failing line does **not** cancel the rest. Provide orders inline with repeated `--line`, or from a CSV `--file` (one `service|link|quantity` per line).
+
+| Flag                | Description                                                              |
+| ------------------- | ------------------------------------------------------------------------ |
+| `--line "<s\|l\|q>"`| Inline order `service|link|quantity`. Repeat `--line` for each order.    |
+| `--file <csv>`      | CSV file with one `service|link|quantity` per line.                      |
+
+```bash
+socialgo mass-order \
+  --line "1234|https://insta.com/p/a|1000" \
+  --line "55|https://insta.com/p/b|500"
+# or
+socialgo mass-order --file ./pedidos.csv
+```
+
+```text
+✔ 2 pedido(s) criado(s):
+  linha 1  Order ID 98765
+  linha 2  Order ID 98766
+```
+
+Lines that fail are listed separately under `✖ N linha(s) com erro:` with the reason. With `--json`, the raw `{ orders: [{ line, order }], errors: [{ line, reason }] }` is printed.
+
+---
+
+### `subscription create`
+
+Creates a **recurring** subscription — it auto re-orders a service on a fixed cadence. Unlike a single drip-feed order, a subscription is an ongoing schedule. All five flags are required.
+
+| Flag                  | Description                                         |
+| --------------------- | --------------------------------------------------- |
+| `--service <id>`      | Service id.                                         |
+| `--link <url>`        | Target link (profile/post/video).                   |
+| `--quantity <n>`      | Quantity ordered on **each** run.                   |
+| `--runs <n>`          | Total number of recurring runs.                     |
+| `--interval <min>`    | Interval in **minutes** between runs.               |
+
+```bash
+socialgo subscription create --service 70 --link https://insta.com/u \
+  --quantity 100 --runs 30 --interval 1440
+```
+
+```text
+✔ Assinatura criada (active).
+  Subscription ID  sub_abc123
+  Execuções        30/30 restantes
+  Intervalo        1440 min
+```
+
+With `--json`, the raw `{ subscription, status, runs, remaining_runs, interval, next_run }` is printed.
+
+---
+
+### `subscription list`
+
+Lists your recurring subscriptions as a table (id, service, status, remaining runs, interval, next run).
+
+```bash
+socialgo subscription list
+```
+
+With `--json`, the full array is printed.
+
+---
+
+### `coupon validate <code>`
+
+Validates / **previews** a coupon **without** redeeming it (read-only). `kind` is `deposit_bonus` (percentage) or `wallet_credit` (fixed credit).
+
+```bash
+socialgo coupon validate WELCOME10
+```
+
+```text
+✔ Cupom WELCOME10 válido.
+  Tipo        bônus em depósito
+  Valor       10%
+```
+
+Invalid coupons print `✖ Cupom <code> inválido.` with the reason. With `--json`, the raw `{ valid, reason?, code?, kind?, value?, minAmount?, expiresAt? }` is printed.
+
+---
+
+### `affiliate stats`
+
+Shows your **own** affiliate numbers and referral link (code, balance, commission rates, referral counts, total earned, minimum payout).
+
+```bash
+socialgo affiliate stats
+```
+
+With `--json`, the raw affiliate stats object is printed.
+
+---
+
+### `affiliate link`
+
+Prints just your referral link and code.
+
+```bash
+socialgo affiliate link
+```
+
+```text
+https://your-panel.com/?ref=abc123
+código: abc123
+```
+
+With `--json`: `{ "referral_code": "abc123", "referral_link": "https://…" }`.
+
+---
+
+### `loyalty`
+
+Shows your loyalty tier, points, lifetime spend and progress toward the next tier.
+
+```bash
+socialgo loyalty
+```
+
+```text
+Fidelidade
+  Tier          Gold (gold)
+  Pontos        1240
+  Gasto total   620 USD
+  Progresso     74% para o próximo tier (840)
+```
+
+With `--json`, the raw `{ tier, label, next_threshold, progress_pct, points_balance, lifetime_spent, currency }` is printed.
+
+---
+
+### `recommend <serviceId|platform>`
+
+**Recommends** related services from an anchor service and/or a platform. The positional argument is a shortcut: numeric → `--service`, otherwise → `--platform`.
+
+| Flag                       | Description                              |
+| -------------------------- | ---------------------------------------- |
+| `--service <id>`           | Anchor service id.                       |
+| `--platform <platform>`    | Platform (instagram, tiktok, …).         |
+| `--limit <n>`              | Max results.                             |
+
+```bash
+socialgo recommend 1234
+socialgo recommend instagram
+socialgo recommend --service 1234 --limit 5
+```
+
+Prints a ranked table with a `reason` (bought together / same platform / popular). With `--json`, the raw array is printed.
+
+---
+
+### `campaign build`
+
+Builds a campaign **plan** from a budget, a goal and a delivery window in days — it does **not** place any order. Review the plan, then execute it with `subscription create` or `order add`.
+
+| Flag                       | Description                                        |
+| -------------------------- | -------------------------------------------------- |
+| `--budget <value>` (required) | Total budget (positive number).                 |
+| `--days <n>` (required)    | Delivery window in days for gradual rollout.       |
+| `--service <id>`           | Target service id. Provide this **or** `--platform`. |
+| `--platform <platform>`    | Target platform, used when no `--service` is given. |
+| `--goal <goal>`            | Boost type to bias selection (followers, views, likes). |
+| `--link <url>`             | Target link (optional, carried in the plan).       |
+
+```bash
+socialgo campaign build --budget 100 --days 30 --platform instagram --goal followers
+socialgo campaign build --budget 50 --days 7 --service 1234
+```
+
+```text
+✔ Plano de campanha (proposta — nada foi cobrado).
+  Serviço       1234 Instagram Followers
+  Qtd total     5000
+  Custo total   90
+  Execuções     30
+  Intervalo     1440 min
+```
+
+Infeasible plans print `✖ Plano inviável.` with the reason. With `--json`, the raw `{ feasible, reason?, service?, totalQuantity?, totalCost?, runs?, intervalMinutes?, schedule?, params }` is printed.
+
+---
+
+### `storefront <slug>`
+
+Resolves a **public** storefront by its slug and lists its packages. The displayed package price is a reference — the charged amount is recomputed server-side.
+
+```bash
+socialgo storefront my-shop
+```
+
+Prints the store title, description, theme/locale, then a packages table. With `--json`, the raw store object is printed.
 
 ---
 
