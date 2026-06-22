@@ -6,13 +6,18 @@
 
 The `@socialgo/mcp` package ships a [Model Context Protocol](https://modelcontextprotocol.io)
 server (binary `socialgo-mcp`) that exposes the SocialGO panel to AI assistants
-such as Claude Desktop and Claude Code. It speaks the same SMM API v2 protocol
-the panel offers to resellers, plus the public guest-checkout endpoints, behind a
-small, fixed set of tools.
+such as Claude Desktop, Claude Code, Cursor, Cline, Windsurf, and VS Code. It
+speaks the same SMM API v2 protocol the panel offers to resellers, plus the
+public guest-checkout endpoints, behind a small, fixed set of tools.
 
 - **Repository:** https://github.com/SocialGOcompany/socialgo-tools
 - **Transport:** stdio (launched by the AI client)
 - **Configuration:** environment variables only — no secrets in code
+
+> **Install note.** The `@socialgo/*` packages are **not on npm yet** (coming
+> soon). Until then, run the server **from source** — the steps below work today.
+> Once published, the `npx -y @socialgo/mcp` form will work as a drop-in
+> replacement for the `node .../packages/mcp/dist/index.js` command shown here.
 
 ---
 
@@ -32,13 +37,57 @@ The number of tools stays constant no matter how large the catalog grows.
 
 ---
 
+## Install & build (from source)
+
+The server is a Node binary launched over **stdio** by your AI client. Build it
+once, then point your client at the compiled entrypoint.
+
+```bash
+# 1. Clone the monorepo
+git clone https://github.com/SocialGOcompany/socialgo-tools.git
+cd socialgo-tools
+
+# 2. Install workspace deps (pnpm monorepo)
+pnpm install
+
+# 3. Build all packages (compiles packages/mcp → packages/mcp/dist)
+pnpm build
+```
+
+This produces the runnable entrypoint at:
+
+```text
+<repo>/packages/mcp/dist/index.js
+```
+
+Smoke-test it directly (it prints a readiness line to **stderr** and then waits
+for an MCP client to speak to it over stdin — press Ctrl-C to exit):
+
+```bash
+SOCIALGO_API_URL="https://usesocialgo.com" \
+SOCIALGO_API_KEY="your-api-key-here" \
+node <repo>/packages/mcp/dist/index.js
+# stderr: [socialgo-mcp] MCP server ready (stdio).
+```
+
+> Replace `<repo>` with the absolute path where you cloned `socialgo-tools`
+> (e.g. `/home/you/socialgo-tools`). All client configs below use this path.
+
+**Requirements:** Node.js ≥ 18 and [pnpm](https://pnpm.io) (`npm i -g pnpm`).
+
+> **Coming soon — npm.** Once `@socialgo/mcp` is published, you'll be able to
+> drop the build step and use `npx -y @socialgo/mcp` anywhere this guide shows
+> `node <repo>/packages/mcp/dist/index.js`.
+
+---
+
 ## Configuration
 
 All configuration comes from the environment:
 
-| Variable           | Required        | Description                                                                 |
-| ------------------ | --------------- | --------------------------------------------------------------------------- |
-| `SOCIALGO_API_URL` | Recommended     | Base URL of your SocialGO panel (e.g. `https://usesocialgo.com`). The SMM v2 endpoint is `${SOCIALGO_API_URL}/api/v2`. |
+| Variable           | Required          | Description                                                                 |
+| ------------------ | ----------------- | --------------------------------------------------------------------------- |
+| `SOCIALGO_API_URL` | Recommended       | Base URL of your SocialGO panel (e.g. `https://usesocialgo.com`). The SMM v2 endpoint is `${SOCIALGO_API_URL}/api/v2`. Defaults to `https://usesocialgo.com` if unset. |
 | `SOCIALGO_API_KEY` | For reseller mode | Your API key, from **Dashboard › API Key**. Required by every reseller tool. The guest tools do **not** use it. |
 
 Two purchasing modes are supported:
@@ -47,13 +96,191 @@ Two purchasing modes are supported:
   balance. All tools except the guest ones operate in this mode.
 - **Guest mode** — buy **without an account**, pay-per-order, identified only by
   an email. Uses the public `/guest/*` endpoints and needs **no API key**
-  (`socialgo_guest_order`, `socialgo_guest_order_status`).
+  (`socialgo_guest_gateways`, `socialgo_guest_order`,
+  `socialgo_guest_order_status`).
+
+> **Never commit a real API key.** Keep it in your client's `env` block or a
+> local secrets store. A ready-to-edit template lives at
+> [`examples/mcp-claude-config.json`](https://github.com/SocialGOcompany/socialgo-tools/blob/main/examples/mcp-claude-config.json).
+
+---
+
+## Client configuration
+
+Every MCP client launches the server the same way — a `command` plus `args` plus
+an `env` block. The blocks below are copy-pasteable; just replace `<repo>` with
+your clone path and `your-api-key-here` with your key.
+
+> The shape used everywhere is the standard MCP `stdioServer` form:
+>
+> ```jsonc
+> {
+>   "command": "node",
+>   "args": ["<repo>/packages/mcp/dist/index.js"],
+>   "env": {
+>     "SOCIALGO_API_URL": "https://usesocialgo.com",
+>     "SOCIALGO_API_KEY": "your-api-key-here"
+>   }
+> }
+> ```
+>
+> When `@socialgo/mcp` lands on npm, swap `"command": "node"` +
+> `"args": ["<repo>/packages/mcp/dist/index.js"]` for `"command": "npx"` +
+> `"args": ["-y", "@socialgo/mcp"]`.
+
+### Claude Desktop
+
+Edit `claude_desktop_config.json`:
+
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+```jsonc
+{
+  "mcpServers": {
+    "socialgo": {
+      "command": "node",
+      "args": ["<repo>/packages/mcp/dist/index.js"],
+      "env": {
+        "SOCIALGO_API_URL": "https://usesocialgo.com",
+        "SOCIALGO_API_KEY": "your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop — the `socialgo` tools then appear in the tools menu.
+See also [`examples/mcp-claude-config.json`](https://github.com/SocialGOcompany/socialgo-tools/blob/main/examples/mcp-claude-config.json).
+
+### Claude Code
+
+Register it with one command (no JSON file to edit):
+
+```bash
+claude mcp add socialgo \
+  --env SOCIALGO_API_URL=https://usesocialgo.com \
+  --env SOCIALGO_API_KEY=your-api-key-here \
+  -- node <repo>/packages/mcp/dist/index.js
+```
+
+Verify it loaded:
+
+```bash
+claude mcp list
+```
+
+### Cursor
+
+Add the server to Cursor's MCP config — `~/.cursor/mcp.json` (global) or
+`.cursor/mcp.json` in your project root:
+
+```jsonc
+{
+  "mcpServers": {
+    "socialgo": {
+      "command": "node",
+      "args": ["<repo>/packages/mcp/dist/index.js"],
+      "env": {
+        "SOCIALGO_API_URL": "https://usesocialgo.com",
+        "SOCIALGO_API_KEY": "your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+Then enable **socialgo** under **Settings › MCP**.
+
+### Cline (VS Code extension)
+
+Open Cline's MCP settings (**Cline › MCP Servers › Configure**, which edits
+`cline_mcp_settings.json`) and add:
+
+```jsonc
+{
+  "mcpServers": {
+    "socialgo": {
+      "command": "node",
+      "args": ["<repo>/packages/mcp/dist/index.js"],
+      "env": {
+        "SOCIALGO_API_URL": "https://usesocialgo.com",
+        "SOCIALGO_API_KEY": "your-api-key-here"
+      },
+      "disabled": false
+    }
+  }
+}
+```
+
+### Windsurf
+
+Edit `~/.codeium/windsurf/mcp_config.json` (or use **Settings › Cascade › MCP
+Servers › Add server**):
+
+```jsonc
+{
+  "mcpServers": {
+    "socialgo": {
+      "command": "node",
+      "args": ["<repo>/packages/mcp/dist/index.js"],
+      "env": {
+        "SOCIALGO_API_URL": "https://usesocialgo.com",
+        "SOCIALGO_API_KEY": "your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+### VS Code (GitHub Copilot agent mode)
+
+Create `.vscode/mcp.json` in your workspace (note VS Code uses a top-level
+`servers` key):
+
+```jsonc
+{
+  "servers": {
+    "socialgo": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["<repo>/packages/mcp/dist/index.js"],
+      "env": {
+        "SOCIALGO_API_URL": "https://usesocialgo.com",
+        "SOCIALGO_API_KEY": "your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+Then start it from the **MCP: List Servers** command, or it auto-starts when you
+open agent mode.
+
+---
+
+## Tools at a glance
+
+The server registers **12 tools**. All return their result as JSON text.
+
+| Tool | Mode | Purpose | Required input |
+| ---- | ---- | ------- | -------------- |
+| `socialgo_balance` | Reseller | Account balance + currency. | _(none)_ |
+| `socialgo_services` | Reseller | Search/filter the catalog by natural-language intent. | _(none)_ |
+| `socialgo_service_details` | Reseller | Full details of one service by id. | `service` |
+| `socialgo_place_order` | Reseller | Create an order (per-type params + drip-feed). | `service`, `link` |
+| `socialgo_order_status` | Reseller | Status of one or many orders. | `order` or `orders` |
+| `socialgo_refill` | Reseller | Request a refill for one or many orders. | `order` or `orders` |
+| `socialgo_refill_status` | Reseller | Status of a refill (by refill id or order id). | `refill` or `order` |
+| `socialgo_cancel` | Reseller | Cancel one or many orders. | `orders` |
+| `socialgo_orders` | Reseller | Account order history. | _(none)_ |
+| `socialgo_guest_gateways` | Guest | List active payment methods for guest checkout. | _(none)_ |
+| `socialgo_guest_order` | Guest | Buy without an account; returns a payment URL. | `email`, `serviceId`, `link` |
+| `socialgo_guest_order_status` | Guest | Track a guest order by token or email. | `id` + (`token` or `email`) |
 
 ---
 
 ## Tool reference
-
-The server registers **11 tools**. All return their result as JSON text.
 
 ### Catalog & wallet
 
@@ -66,6 +293,15 @@ Returns the current account balance on the SocialGO panel (`balance` +
 | ----- | ---- | -------- | ----------- |
 | _(none)_ | — | — | No inputs. |
 
+Example call / response:
+
+```jsonc
+// call
+{}
+// → response (JSON text)
+{ "balance": "42.50", "currency": "USD" }
+```
+
 > _"What's my SocialGO balance?"_
 
 ---
@@ -73,10 +309,10 @@ Returns the current account balance on the SocialGO panel (`balance` +
 #### `socialgo_services`
 
 The heart of the search-then-act design. Searches and filters the SMM catalog by
-a natural-language intent and returns **only the relevant services** (service id,
-name, category, type, rate per 1000, min, max, and refill/cancel/dripfeed flags).
-Always call this before `socialgo_place_order` to discover the correct `service`
-id.
+a natural-language intent and returns **only the relevant services**. Matching is
+a case-insensitive substring search across each service's `name`, `category`, and
+`type`, ranked by how many query terms hit and then by lowest `rate`. Always call
+this before `socialgo_place_order` to discover the correct `service` id.
 
 | Input | Type | Required | Description |
 | ----- | ---- | -------- | ----------- |
@@ -85,8 +321,50 @@ id.
 | `type` | string | No | Optional service-type filter, e.g. `"Default"`, `"Package"`, `"Custom Comments"`, `"Poll"`. |
 | `limit` | integer (1–50) | No | Max services to return. Default `20`. |
 
-Returns `{ count, total, services }` where `services` is the ranked, trimmed
-list.
+Returns `{ count, total, services }`, where `count` is how many matched (after
+the limit), `total` is the full catalog size, and `services` is the ranked,
+trimmed list. Each service item has the shape:
+
+```jsonc
+{
+  "service": 1234,        // id to use in place_order / guest_order
+  "name": "Instagram Followers — Brazilian (Real)",
+  "type": "Default",
+  "category": "Instagram Followers",
+  "rate": "0.90",         // price per 1000
+  "min": "100",
+  "max": "100000",
+  "refill": true,
+  "cancel": true,
+  "dripfeed": true
+}
+```
+
+Example call / response:
+
+```jsonc
+// call
+{ "query": "brazilian instagram followers", "platform": "Instagram", "limit": 3 }
+// → response
+{
+  "count": 1,
+  "total": 4821,
+  "services": [
+    {
+      "service": 1234,
+      "name": "Instagram Followers — Brazilian (Real)",
+      "type": "Default",
+      "category": "Instagram Followers",
+      "rate": "0.90",
+      "min": "100",
+      "max": "100000",
+      "refill": true,
+      "cancel": true,
+      "dripfeed": false
+    }
+  ]
+}
+```
 
 > _"Find me cheap Instagram followers."_
 
@@ -96,11 +374,32 @@ list.
 
 Returns the full details of a single catalog service by its id (rate, min, max,
 type, and refill/cancel/dripfeed flags). Use it to confirm limits and type before
-placing an order.
+placing an order. (Internally this fetches the catalog and returns the matching
+item; it errors if the id is not found.)
 
 | Input | Type | Required | Description |
 | ----- | ---- | -------- | ----------- |
 | `service` | number \| string | Yes | Service id from `socialgo_services`. |
+
+Example call / response:
+
+```jsonc
+// call
+{ "service": 1234 }
+// → response
+{
+  "service": 1234,
+  "name": "Instagram Followers — Brazilian (Real)",
+  "type": "Default",
+  "category": "Instagram Followers",
+  "rate": "0.90",
+  "min": "100",
+  "max": "100000",
+  "refill": true,
+  "cancel": true,
+  "dripfeed": false
+}
+```
 
 > _"Show me the details and limits for service 1234."_
 
@@ -144,7 +443,31 @@ Full input schema:
 | `media` | string | No | Mentions Media Likers: link/id of the reference media. |
 | `answer_number` | integer | No | Poll: the answer option number to vote for. |
 
-> _"Order 1000 of service 1234 for https://instagram.com/p/abc."_
+Example call / response:
+
+```jsonc
+// call (Default service)
+{
+  "service": 1234,
+  "link": "https://instagram.com/some.profile",
+  "quantity": 1000
+}
+// → response
+{ "order": 98765 }
+```
+
+```jsonc
+// call (Drip-feed: 5 runs of 200 every 60 min)
+{
+  "service": 1234,
+  "link": "https://instagram.com/some.profile",
+  "quantity": 200,
+  "runs": 5,
+  "interval": 60
+}
+```
+
+> _"Order 1000 of service 1234 for https://instagram.com/some.profile."_
 
 ---
 
@@ -159,9 +482,29 @@ for several at once.
 | `order` | number \| string | No* | Id of a single order. |
 | `orders` | array of (number \| string) | No* | List of order ids for a batch lookup. |
 
-\* Provide either `order` or `orders`.
+\* Provide either `order` or `orders` (if both are given, `orders` wins).
 
-> _"What's the status of order 98765?"_ · _"Check orders 98765, 4321 and 5566."_
+Example call / response:
+
+```jsonc
+// call (single)
+{ "order": 98765 }
+// → response
+{
+  "charge": "0.90",
+  "start_count": "12000",
+  "status": "In progress",
+  "remains": "350",
+  "currency": "USD"
+}
+```
+
+```jsonc
+// call (batch — keyed by order id)
+{ "orders": [98765, 4321] }
+```
+
+> _"What's the status of order 98765?"_ · _"Check orders 98765 and 4321."_
 
 ---
 
@@ -175,7 +518,16 @@ refills. Returns the refill id(s), used later with `socialgo_refill_status`.
 | `order` | number \| string | No* | Id of a single order to refill. |
 | `orders` | array of (number \| string) | No* | List of order ids to refill in batch. |
 
-\* Provide either `order` or `orders`.
+\* Provide either `order` or `orders` (if both are given, `orders` wins).
+
+Example call / response:
+
+```jsonc
+// call
+{ "order": 98765 }
+// → response
+{ "refill": 555 }
+```
 
 > _"Request a refill for order 98765."_
 
@@ -183,16 +535,25 @@ refills. Returns the refill id(s), used later with `socialgo_refill_status`.
 
 #### `socialgo_refill_status`
 
-Checks the status of a refill (Pending / Completed / Rejected). Pass the `refill`
-id (returned by `socialgo_refill`) **or** the `order` id (uses that order's most
-recent refill).
+Checks the status of a refill (`Pending` / `Completed` / `Rejected`). Pass the
+`refill` id (returned by `socialgo_refill`) **or** the `order` id (uses that
+order's most recent refill).
 
 | Input | Type | Required | Description |
 | ----- | ---- | -------- | ----------- |
 | `refill` | number \| string | No* | Refill id (returned by `socialgo_refill`). |
 | `order` | number \| string | No* | Order id — looks up its most recent refill. |
 
-\* Provide either `refill` or `order`.
+\* Provide either `refill` or `order` (`refill` takes precedence if both given).
+
+Example call / response:
+
+```jsonc
+// call
+{ "refill": 555 }
+// → response
+{ "status": "Completed" }
+```
 
 > _"Is the refill for order 98765 done yet?"_
 
@@ -206,6 +567,18 @@ per order, whether the cancellation was accepted or the error.
 | Input | Type | Required | Description |
 | ----- | ---- | -------- | ----------- |
 | `orders` | array of (number \| string), min 1 | Yes | List of order ids to cancel. |
+
+Example call / response:
+
+```jsonc
+// call
+{ "orders": [98765, 4321] }
+// → response
+[
+  { "order": 98765, "cancel": 1 },
+  { "order": 4321, "cancel": { "error": "Cancel not allowed for this service" } }
+]
+```
 
 > _"Cancel orders 98765 and 4321."_
 
@@ -226,9 +599,41 @@ Lists the account's order history on the panel (`id`, `charge`, `status`,
 
 ### Guest checkout (no account)
 
-These two tools buy **without an account** (pay-per-order). They hit the public
+These tools buy **without an account** (pay-per-order). They hit the public
 `/guest/*` endpoints and do **not** use `SOCIALGO_API_KEY`, so they work even
 without a reseller key configured.
+
+#### `socialgo_guest_gateways`
+
+Lists the payment methods **currently active** on the panel for guest checkout
+(`GET /gateways/active`). Returns `{ gateways: [{ gateway, label, kind, coins,
+notice }] }`, where `gateway` is the value to pass as `method` in
+`socialgo_guest_order`. **Call this before offering payment options** — offer
+only the methods returned here; never assume a fixed list. If the panel can't be
+reached, it returns an empty `gateways` array plus a `note` describing a minimal
+safe fallback.
+
+| Input | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| _(none)_ | — | — | No inputs. |
+
+Example call / response:
+
+```jsonc
+// call
+{}
+// → response
+{
+  "gateways": [
+    { "gateway": "mercadopago", "label": "PIX + card + boleto", "kind": "hosted", "coins": [] },
+    { "gateway": "stripe", "label": "Card", "kind": "hosted", "coins": [] }
+  ]
+}
+```
+
+> _"Which payment methods can I use without an account?"_
+
+---
 
 #### `socialgo_guest_order`
 
@@ -243,12 +648,34 @@ complete payment.
 | `serviceId` | string | Yes | Id of the service to buy (from `socialgo_services`). |
 | `link` | string | Yes | Target link of the order (profile, post, video, etc.). |
 | `quantity` | integer > 0 | No | Desired quantity, within the service's min/max. For list types it is derived from the lines in `metadata`. |
-| `method` | enum: `stripe` \| `mercadopago` \| `crypto` \| `paypal` \| `paytm` | Yes | Payment method. `mercadopago` = PIX + card + boleto; `stripe` = card; `crypto`/`paypal`/`paytm` as enabled. Only methods active on the panel work. |
+| `method` | string | No | Payment gateway — the `gateway` value from `socialgo_guest_gateways`. **Not a fixed list.** Validated against the panel's active gateways at call time. If omitted, the first active gateway is used. |
 | `metadata` | object | No | Per-type extra fields (`comments`, `usernames`, `hashtags`, `hashtag`, `username`, `media`, `answer_number`, `runs`, `interval`). Send only those relevant to the service type. |
 
 Returns `{ orderId, guestToken, url, amount, currency }`. **Hand the `url` to the
 user** and keep `orderId` + `guestToken` to track via
-`socialgo_guest_order_status`.
+`socialgo_guest_order_status`. If `method` isn't one of the panel's active
+gateways, the tool returns a clear error listing the valid ones.
+
+Example call / response:
+
+```jsonc
+// call
+{
+  "email": "buyer@example.com",
+  "serviceId": "872",
+  "link": "https://www.tiktok.com/@user/video/123456789",
+  "quantity": 500,
+  "method": "mercadopago"
+}
+// → response
+{
+  "orderId": "ord_abc123",
+  "guestToken": "gtok_9f8e7d6c",
+  "url": "https://usesocialgo.com/guest/pay/ord_abc123",
+  "amount": "1.20",
+  "currency": "USD"
+}
+```
 
 > _"Buy 500 TikTok views for me — my email is buyer@example.com — pay with PIX."_
 
@@ -266,27 +693,61 @@ preferred) **or** the `email` used at purchase.
 | `token` | string | No* | `guestToken` returned at creation (preferred way to prove ownership). |
 | `email` | string (email) | No* | Email used at purchase (alternative to the token). |
 
-\* Provide either `token` or `email`.
+\* Provide either `token` or `email` (`token` takes precedence if both given).
 
 Returns `{ id, status, serviceName, link, quantity, charge, startCount, remains,
 createdAt }`. A status of `awaiting_payment` means the order has not been paid
 yet.
 
+Example call / response:
+
+```jsonc
+// call
+{ "id": "ord_abc123", "token": "gtok_9f8e7d6c" }
+// → response
+{
+  "id": "ord_abc123",
+  "status": "awaiting_payment",
+  "serviceName": "TikTok Views",
+  "link": "https://www.tiktok.com/@user/video/123456789",
+  "quantity": 500,
+  "charge": "1.20",
+  "startCount": null,
+  "remains": null,
+  "createdAt": "2026-06-21T18:04:00.000Z"
+}
+```
+
 > _"Has my guest order ord_abc123 been paid and started?"_
 
 ---
 
-## Example: an AI-driven guest purchase
+## Example flow: search a service and create an order
 
 A complete conversation, no account required:
 
 > **User:** I want 500 views on my latest TikTok video. My email is
 > `buyer@example.com` and I'd like to pay with PIX.
 
-1. The assistant calls **`socialgo_services`** with `query: "tiktok views"`,
-   `platform: "TikTok"` and picks a service from the result, e.g. service
-   `872` (rate, min, max all checked).
-2. It confirms the choice and the limits with the user, then calls
+1. **Search.** The assistant calls **`socialgo_services`** with
+   `query: "tiktok views"`, `platform: "TikTok"` and picks a service from the
+   result, e.g. service `872` (rate, min, max all checked):
+
+   ```jsonc
+   // call
+   { "query": "tiktok views", "platform": "TikTok", "limit": 3 }
+   // → response (trimmed)
+   { "count": 1, "total": 4821, "services": [
+     { "service": 872, "name": "TikTok Views", "type": "Default",
+       "category": "TikTok Views", "rate": "0.24", "min": "100", "max": "1000000" }
+   ] }
+   ```
+
+2. **Check payment options.** Because this is a guest purchase, it calls
+   **`socialgo_guest_gateways`** and offers only the active methods (it sees
+   `mercadopago` covers PIX, matching the user's request).
+
+3. **Create the order.** With the user's confirmation it calls
    **`socialgo_guest_order`**:
 
    ```jsonc
@@ -297,11 +758,7 @@ A complete conversation, no account required:
      "quantity": 500,
      "method": "mercadopago"
    }
-   ```
-
-   Response:
-
-   ```jsonc
+   // → response
    {
      "orderId": "ord_abc123",
      "guestToken": "gtok_9f8e7d6c",
@@ -311,14 +768,15 @@ A complete conversation, no account required:
    }
    ```
 
-3. The assistant replies:
+4. **Hand off the payment link.** The assistant replies:
 
    > Your order is ready — 500 TikTok views for $1.20. Open this link and
    > complete the payment (PIX, card, or boleto):
    > **https://usesocialgo.com/guest/pay/ord_abc123**
    > I'll track it once you've paid.
 
-4. After the user pays, the assistant calls **`socialgo_guest_order_status`**:
+5. **Track delivery.** After the user pays, the assistant calls
+   **`socialgo_guest_order_status`**:
 
    ```jsonc
    { "id": "ord_abc123", "token": "gtok_9f8e7d6c" }
@@ -328,69 +786,9 @@ A complete conversation, no account required:
    been paid yet. Once it confirms, `status` moves on and `startCount` /
    `remains` populate — the assistant then reports delivery progress.
 
----
-
-## Installation
-
-The server runs over **stdio**, launched on demand by your AI client.
-
-### Claude Desktop
-
-Add the server to `claude_desktop_config.json`:
-
-- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-
-```jsonc
-{
-  "mcpServers": {
-    "socialgo": {
-      "command": "npx",
-      "args": ["-y", "@socialgo/mcp"],
-      "env": {
-        "SOCIALGO_API_URL": "https://usesocialgo.com",
-        "SOCIALGO_API_KEY": "your-api-key-here"
-      }
-    }
-  }
-}
-```
-
-> For **guest-only** usage you may omit `SOCIALGO_API_KEY` — the
-> `socialgo_guest_order` and `socialgo_guest_order_status` tools work without it.
-> The reseller tools will return a clear error until a key is set.
-
-Restart Claude Desktop. The `socialgo` tools then appear in the tools menu.
-
-### Claude Code
-
-Add the server with the `claude mcp add` command:
-
-```bash
-claude mcp add socialgo \
-  --env SOCIALGO_API_URL=https://usesocialgo.com \
-  --env SOCIALGO_API_KEY=your-api-key-here \
-  -- npx -y @socialgo/mcp
-```
-
-To verify it loaded:
-
-```bash
-claude mcp list
-```
-
-### Run directly
-
-You can also point any MCP client at the binary:
-
-```bash
-SOCIALGO_API_URL=https://usesocialgo.com \
-SOCIALGO_API_KEY=your-api-key-here \
-npx -y @socialgo/mcp
-```
-
-The server logs `[socialgo-mcp] MCP server ready (stdio).` to stderr (stdout is
-reserved for the MCP protocol).
+> **Reseller variant.** With a `SOCIALGO_API_KEY` set, swap steps 2–5 for
+> `socialgo_place_order` (debits the wallet directly, returns an `order` id) and
+> track with `socialgo_order_status`. No payment URL is involved.
 
 ---
 
@@ -401,3 +799,13 @@ reserved for the MCP protocol).
 - The model only ever sees the SocialGO panel — no upstream provider is exposed.
 - Guest order status returns only the buyer's own safe fields; it never reveals
   third-party data.
+- Logs go to **stderr** (`[socialgo-mcp] MCP server ready (stdio).`); stdout is
+  reserved for the MCP protocol.
+- Network calls time out after 30 seconds with a clear, model-readable message.
+
+---
+
+## Related packages
+
+- [`@socialgo/sdk`](https://github.com/SocialGOcompany/socialgo-tools/tree/main/packages/sdk) — typed client for the SMM v2 protocol.
+- [`@socialgo/cli`](https://github.com/SocialGOcompany/socialgo-tools/tree/main/packages/cli) — the `socialgo` command-line tool.

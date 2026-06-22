@@ -49,7 +49,7 @@ The tools are designed so that **no secret is ever embedded in the code**. Crede
 are read only from the environment:
 
 - `SOCIALGO_API_URL` — your panel base URL.
-- `SOCIALGO_API_KEY` — your reseller API key (from `/dashboard/api-key`).
+- `SOCIALGO_API_KEY` — your reseller API key (from your panel under **Account › API**).
 
 Guidelines:
 

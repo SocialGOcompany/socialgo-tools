@@ -1,7 +1,8 @@
 # Contributing to socialgo-tools
 
 Thanks for your interest in improving the official SocialGO tools. This repository is a
-pnpm monorepo with three published packages:
+pnpm monorepo with three packages (not yet published to npm — installed by
+[building from source](README.md#installation)):
 
 | Package          | Path             | What it is                                        |
 | ---------------- | ---------------- | ------------------------------------------------- |

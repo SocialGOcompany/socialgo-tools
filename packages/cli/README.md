@@ -11,11 +11,44 @@ The binary is named `socialgo`.
 
 ## Installation
 
-```bash
-# Global install (recommended)
-npm install -g @socialgo/cli
+> **Heads-up:** this package is **not on npm yet** — `npm install -g @socialgo/cli` and `npx @socialgo/cli` are **coming soon**. Until then, run it from source (below). These steps work today.
 
-# Or run on demand
+### Build from source (works today)
+
+Requires Node.js ≥ 18 and [pnpm](https://pnpm.io). The CLI depends on the workspace package `@socialgo/sdk`, so build it inside the monorepo:
+
+```bash
+git clone https://github.com/SocialGOcompany/socialgo-tools.git
+cd socialgo-tools
+pnpm install     # installs deps + links @socialgo/sdk
+pnpm build       # builds all packages
+```
+
+Then run the `socialgo` binary any of these ways:
+
+```bash
+# Via the package start script (from repo root)
+pnpm --filter @socialgo/cli start -- config
+
+# Or the built entrypoint directly
+node packages/cli/dist/index.js config
+
+# Or expose `socialgo` globally on your PATH
+pnpm --filter @socialgo/cli exec npm link
+socialgo config
+```
+
+To try a command without building, run the source with `tsx`:
+
+```bash
+pnpm --filter @socialgo/cli exec tsx src/index.ts config
+```
+
+### Coming soon (npm)
+
+```bash
+# Not published yet — coming soon
+npm install -g @socialgo/cli
 npx @socialgo/cli config
 ```
 
@@ -61,6 +94,7 @@ Global flags: `--json` (raw JSON output), `--api-url <url>`, `--key <key>`.
 | `wallet`                     | API key  | Wallet summary (balance + recent transactions).                |
 | `add-funds`                  | API key  | Create a pending top-up payment.                               |
 | `admin sync-catalog`         | admin    | Sync the catalog from active suppliers.                        |
+| `guest-gateways`             | **none** | List the panel's active payment methods (use for `--method`).  |
 | `guest-services`             | **none** | Public catalog — find a `serviceId` for a guest order.         |
 | `guest-order <serviceId>`    | **none** | Place a no-account order and get a payment URL.                |
 | `guest-status <id>`          | **none** | Status of a guest order (`--token` or `--email`).              |
@@ -70,6 +104,8 @@ Full reference, flags, and example outputs: [`docs/cli.md`](https://github.com/S
 ---
 
 ## Quick start
+
+> Examples below use `socialgo <command>`. If you haven't linked the binary (`npm link`), substitute your run method — e.g. `node packages/cli/dist/index.js <command>`.
 
 ```bash
 # Configure and check
