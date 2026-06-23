@@ -92,7 +92,7 @@ This is the part that changes how you work. Add the SMM MCP server once, then ju
       "command": "npx",
       "args": ["-y", "@socialgo/mcp"],
       "env": {
-        "SOCIALGO_API_URL": "https://usesocialgo.com",
+        "SOCIALGO_API_URL": "https://api.usesocialgo.com",
         "SOCIALGO_API_KEY": "YOUR_API_KEY"
       }
     }
@@ -104,7 +104,7 @@ This is the part that changes how you work. Add the SMM MCP server once, then ju
 
 ```bash
 claude mcp add socialgo \
-  --env SOCIALGO_API_URL=https://usesocialgo.com \
+  --env SOCIALGO_API_URL=https://api.usesocialgo.com \
   --env SOCIALGO_API_KEY=YOUR_API_KEY \
   -- npx -y @socialgo/mcp
 ```
@@ -225,7 +225,7 @@ See [Use it from Claude](#use-it-from-claude-30-second-setup) above for the copy
 ```bash
 npm i -g @socialgo/cli
 
-export SOCIALGO_API_URL="https://usesocialgo.com"
+export SOCIALGO_API_URL="https://api.usesocialgo.com"
 export SOCIALGO_API_KEY="YOUR_API_KEY"
 
 socialgo config                              # confirm URL + key
@@ -332,11 +332,11 @@ Every tool reads the same two environment variables. Secrets always come from th
 
 | Variable | Required | What it is |
 | --- | --- | --- |
-| `SOCIALGO_API_URL` | yes | Base URL of your SocialGO panel, e.g. `https://usesocialgo.com`. The SMM v2 endpoint is `{SOCIALGO_API_URL}/api/v2`. |
+| `SOCIALGO_API_URL` | yes | Base URL of your SocialGO panel, e.g. `https://api.usesocialgo.com`. The SMM v2 endpoint is `{SOCIALGO_API_URL}/api/v2`. |
 | `SOCIALGO_API_KEY` | account mode | Your API key, found in the panel under **Account › API**. Not needed for [guest mode](#guest-checkout-buy-with-no-account). |
 
 ```bash
-export SOCIALGO_API_URL="https://usesocialgo.com"
+export SOCIALGO_API_URL="https://api.usesocialgo.com"
 export SOCIALGO_API_KEY="YOUR_API_KEY"
 ```
 

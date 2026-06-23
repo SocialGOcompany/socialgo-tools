@@ -8,12 +8,12 @@ always carries `key` and `action`. This script wraps the actions you use most
 (services, add, status, balance) with the `requests` library.
 
 Config via environment:
-    SOCIALGO_API_URL   base URL of your panel (e.g. https://usesocialgo.com)
+    SOCIALGO_API_URL   base URL of your panel (e.g. https://api.usesocialgo.com)
     SOCIALGO_API_KEY   your reseller API key (from /dashboard/api-key)
 
 Install the one dependency, then run:
     pip install requests
-    SOCIALGO_API_URL=https://usesocialgo.com \\
+    SOCIALGO_API_URL=https://api.usesocialgo.com \\
     SOCIALGO_API_KEY=YOUR_API_KEY \\
     python examples/reseller.py \\
         --query "instagram followers" \\

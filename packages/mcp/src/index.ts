@@ -8,7 +8,9 @@
  *
  * Toda configuração sensível vem do ambiente (ver src/tools.ts):
  *   - SOCIALGO_API_URL  base do painel SocialGO
- *   - SOCIALGO_API_KEY  chave de API do usuário/revendedor
+ *   - SOCIALGO_API_KEY  chave de API do usuário/revendedor. OPCIONAL: só as tools
+ *     de revendedor (saldo, place_order, wallet, ...) a exigem. O funil GUEST
+ *     (socialgo_guest_services → socialgo_guest_order) funciona SEM chave.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

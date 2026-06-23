@@ -10,7 +10,7 @@
  */
 import type { SmmService, SmmOrderStatus } from "@socialgo/sdk";
 
-const DEFAULT_BASE = "https://usesocialgo.com";
+const DEFAULT_BASE = "https://api.usesocialgo.com";
 
 /** Item do catálogo como a reseller API v2 do SocialGO devolve em `services`. */
 export interface CatalogService extends SmmService {

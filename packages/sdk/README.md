@@ -50,7 +50,7 @@ for detailed install options.
 
 | Variable           | Description                                                                                |
 | ------------------ | ------------------------------------------------------------------------------------------ |
-| `SOCIALGO_API_URL` | Base URL of the panel, e.g. `https://usesocialgo.com`. You append `/api/v2` for the client. |
+| `SOCIALGO_API_URL` | Base URL of the panel, e.g. `https://api.usesocialgo.com`. You append `/api/v2` for the client. |
 | `SOCIALGO_API_KEY` | Your account key, from the panel under `/dashboard/api-key`.                                |
 
 > `apiUrl` is the **full** endpoint URL the client posts to — it does not append `/api/v2`

@@ -70,7 +70,7 @@ Key points:
 ## The endpoints
 
 Everything is relative to your panel base URL — `SOCIALGO_API_URL`
-(e.g. `https://usesocialgo.com`). These routes are public and accept **no API key**.
+(e.g. `https://api.usesocialgo.com`). These routes are public and accept **no API key**.
 
 | Method | Path                  | Purpose                                          |
 | ------ | --------------------- | ------------------------------------------------ |
@@ -263,7 +263,7 @@ Install the CLI and point it at your panel (no API key needed for guest commands
 
 ```bash
 npm install -g @socialgo/cli
-export SOCIALGO_API_URL="https://usesocialgo.com"   # your panel base URL
+export SOCIALGO_API_URL="https://api.usesocialgo.com"   # your panel base URL
 ```
 
 Find a service in the public catalog:

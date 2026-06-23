@@ -7,7 +7,7 @@
  * catálogo, pedidos (com params por tipo), status, refill, cancel e carteira.
  *
  * Config por ambiente (ou flags globais --api-url / --key):
- *   SOCIALGO_API_URL   base da API (default https://usesocialgo.com)
+ *   SOCIALGO_API_URL   base da API (default https://api.usesocialgo.com)
  *   SOCIALGO_API_KEY   chave de revendedor (SMM API v2)
  *
  * Exemplos:
@@ -413,11 +413,24 @@ program
   .addHelpText(
     "after",
     `
-Configuração:
-  Defina ${c.bold("SOCIALGO_API_URL")} e ${c.bold("SOCIALGO_API_KEY")} no ambiente,
-  ou use as flags globais --api-url e --key. Veja: ${c.cyan("socialgo config")}
+Dois modos:
+  ${c.bold("GUEST (sem conta / sem chave)")} — comprar sem ter conta. NÃO precisa de SOCIALGO_API_KEY.
+    Comandos guest-*: ${c.cyan("guest-services")} → ${c.cyan("guest-gateways")} → ${c.cyan("guest-order")} → ${c.cyan("guest-status")}.
+  ${c.bold("REVENDEDOR (com conta + chave)")} — opera a conta (saldo/pedidos debitados). Requer SOCIALGO_API_KEY.
+    Demais comandos (balance, services, order, wallet, …).
 
-Exemplos:
+Configuração:
+  ${c.bold("SOCIALGO_API_URL")} aponta a base da API (default https://api.usesocialgo.com).
+  ${c.bold("SOCIALGO_API_KEY")} é OPCIONAL: só os comandos de REVENDEDOR a usam. Os guest-* são keyless.
+  Use as flags globais --api-url e --key, ou veja: ${c.cyan("socialgo config")}
+
+Exemplos (GUEST — sem conta, sem chave):
+  socialgo guest-services --platform instagram --q seguidores
+  socialgo guest-gateways
+  socialgo guest-order <serviceId> --email voce@ex.com --link https://insta.com/seuperfil --quantity 1000
+  socialgo guest-status <orderId> --token <guestToken>
+
+Exemplos (REVENDEDOR — requer chave):
   socialgo config
   socialgo balance
   socialgo services search "instagram seguidores"
@@ -467,11 +480,17 @@ program
     }
     out(c.bold("Configuração SocialGO CLI"));
     out(`  ${c.bold("API URL")}  ${c.cyan(client.resolvedBaseUrl)}`);
-    out(`  ${c.bold("Chave")}    ${client.hasKey ? c.green("definida") : c.red("ausente")}`);
+    out(
+      `  ${c.bold("Chave")}    ${client.hasKey ? c.green("definida") : c.yellow("ausente (opcional)")}`,
+    );
     out();
     if (!client.hasKey) {
-      out(c.yellow("Defina sua chave de revendedor para usar a CLI:"));
-      out(c.dim('  export SOCIALGO_API_KEY="sua-chave"'));
+      out(c.green("Sem chave você JÁ pode comprar sem conta (modo guest, pay-per-order):"));
+      out(c.dim("  socialgo guest-services --platform instagram --q seguidores"));
+      out(c.dim("  socialgo guest-order <serviceId> --email voce@ex.com --link <url> --quantity 1000"));
+      out();
+      out(c.dim("A chave SÓ é necessária para os comandos de REVENDEDOR (saldo/pedidos da conta):"));
+      out(c.dim('  export SOCIALGO_API_KEY="sua-chave"   # opcional — só para modo conta'));
       out(c.dim('  export SOCIALGO_API_URL="https://seu-painel.com"   # opcional'));
       out(c.dim("  # ou por execução: socialgo --key <chave> --api-url <url> balance"));
     }

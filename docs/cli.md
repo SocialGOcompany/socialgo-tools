@@ -78,14 +78,14 @@ The CLI is configured through environment variables, or per-invocation global fl
 
 | Variable           | Required | Default                   | Description                                                                |
 | ------------------ | -------- | ------------------------- | -------------------------------------------------------------------------- |
-| `SOCIALGO_API_URL` | No       | `https://usesocialgo.com` | Base URL of your panel/API. Point this at the host where the API runs. Any trailing slashes are stripped automatically. |
+| `SOCIALGO_API_URL` | No       | `https://api.usesocialgo.com` | Base URL of your panel/API. Point this at the host where the API runs. Any trailing slashes are stripped automatically. |
 | `SOCIALGO_API_KEY` | Yes\*    | —                         | Your reseller API key. Get it in your panel under **Dashboard › API key**. |
 
 \* The API key is required for all **reseller** commands. The **guest** commands (`guest-services`, `guest-gateways`, `guest-order`, `guest-status`) hit public endpoints and work **without a key**.
 
 ```bash
 export SOCIALGO_API_KEY="your-key"
-export SOCIALGO_API_URL="https://your-panel.com"   # optional; defaults to https://usesocialgo.com
+export SOCIALGO_API_URL="https://your-panel.com"   # optional; defaults to https://api.usesocialgo.com
 ```
 
 The key is sent two ways on every reseller request: in the JSON body as `key`, and as an `Authorization: Bearer <key>` header. Requests time out after 30 seconds.

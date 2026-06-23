@@ -60,7 +60,7 @@ Configure via environment variables (or the global `--api-url` / `--key` flags):
 
 | Variable           | Required | Default                    | Description                                                  |
 | ------------------ | -------- | -------------------------- | ------------------------------------------------------------ |
-| `SOCIALGO_API_URL` | No       | `https://usesocialgo.com` | Base URL of your panel/API.                                  |
+| `SOCIALGO_API_URL` | No       | `https://api.usesocialgo.com` | Base URL of your panel/API.                                  |
 | `SOCIALGO_API_KEY` | Yes\*    | —                          | Your API key, from your panel under **/dashboard/api-key**.  |
 
 \* Required for all reseller commands. The **guest** commands work without a key.

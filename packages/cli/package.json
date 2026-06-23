@@ -10,7 +10,7 @@
   "publishConfig": {
     "access": "public"
   },
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Command-line client for SocialGO — browse services, place & track orders, manage balance, all from your terminal.",
   "license": "MIT",
   "type": "module",

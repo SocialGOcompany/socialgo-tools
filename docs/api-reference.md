@@ -55,7 +55,7 @@ The guest surface is a small set of public REST endpoints layered on the same ba
 All requests go to a single base URL. The default is:
 
 ```
-https://usesocialgo.com
+https://api.usesocialgo.com
 ```
 
 You can point the tooling at a different host (e.g. a self-hosted or staging panel)
@@ -104,7 +104,7 @@ Both are equivalent. Pick whichever your HTTP client makes easiest.
 Form-urlencoded:
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -d key="$SOCIALGO_API_KEY" \
   -d action=balance
 ```
@@ -112,7 +112,7 @@ curl -s https://usesocialgo.com/api/v2 \
 JSON (equivalent):
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $SOCIALGO_API_KEY" \
   -d '{"key":"'"$SOCIALGO_API_KEY"'","action":"balance"}'
@@ -196,7 +196,7 @@ List the entire service catalog.
 **Example**
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -d key="$SOCIALGO_API_KEY" \
   -d action=services
 ```
@@ -250,7 +250,7 @@ Place an order. The order cost is debited from your wallet and the order is disp
 **Example — simple order**
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -d key="$SOCIALGO_API_KEY" \
   -d action=add \
   -d service=101 \
@@ -261,7 +261,7 @@ curl -s https://usesocialgo.com/api/v2 \
 **Example — drip-feed**
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -d key="$SOCIALGO_API_KEY" \
   -d action=add \
   -d service=101 \
@@ -320,7 +320,7 @@ be read:
 **Example — single**
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -d key="$SOCIALGO_API_KEY" \
   -d action=status \
   -d order=230193
@@ -329,7 +329,7 @@ curl -s https://usesocialgo.com/api/v2 \
 **Example — batch**
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -d key="$SOCIALGO_API_KEY" \
   -d action=status \
   -d orders="230193,230194,230195"
@@ -366,7 +366,7 @@ List the reseller's order history.
 **Example**
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -d key="$SOCIALGO_API_KEY" \
   -d action=orders
 ```
@@ -398,7 +398,7 @@ Request a refill for an order (only valid on services where `refill` is `true`).
 **Example**
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -d key="$SOCIALGO_API_KEY" \
   -d action=refill \
   -d order=230193
@@ -432,7 +432,7 @@ Get the status of a refill, either by refill id or by the original order id.
 **Example**
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -d key="$SOCIALGO_API_KEY" \
   -d action=refill_status \
   -d refill=4501
@@ -469,7 +469,7 @@ Cancel one or more orders (only valid on services where `cancel` is `true`).
 **Example**
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -d key="$SOCIALGO_API_KEY" \
   -d action=cancel \
   -d orders="230193,230194"
@@ -502,7 +502,7 @@ Get the current account balance.
 **Example**
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -d key="$SOCIALGO_API_KEY" \
   -d action=balance
 ```
@@ -545,7 +545,7 @@ list.
 **Example**
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -d key="$SOCIALGO_API_KEY" \
   -d action=wallet
 ```
@@ -593,7 +593,7 @@ in the panel (or at the gateway's hosted checkout).
 **Example**
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -d key="$SOCIALGO_API_KEY" \
   -d action=add_funds \
   -d amount=20 \
@@ -853,7 +853,7 @@ Re-import the catalog from the active providers.
 **Example**
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -d key="$SOCIALGO_API_KEY" \
   -d action=sync
 ```
@@ -883,7 +883,7 @@ any field left `undefined` or empty.
 **Example — custom comments** (`--data-urlencode` preserves the line breaks):
 
 ```bash
-curl -s https://usesocialgo.com/api/v2 \
+curl -s https://api.usesocialgo.com/api/v2 \
   -d key="$SOCIALGO_API_KEY" \
   -d action=add \
   -d service=512 \
@@ -1011,7 +1011,7 @@ Public catalog used to pick a service without logging in.
 **Example**
 
 ```bash
-curl -s "https://usesocialgo.com/guest/services?platform=instagram&q=followers&limit=20"
+curl -s "https://api.usesocialgo.com/guest/services?platform=instagram&q=followers&limit=20"
 ```
 
 ---
@@ -1052,7 +1052,7 @@ there is no fixed list, gateways are enabled per panel.
 **Example**
 
 ```bash
-curl -s "https://usesocialgo.com/gateways/active"
+curl -s "https://api.usesocialgo.com/gateways/active"
 ```
 
 ---
@@ -1099,7 +1099,7 @@ hosted checkout `url` to complete payment.
 **Example**
 
 ```bash
-curl -s -X POST "https://usesocialgo.com/guest/order" \
+curl -s -X POST "https://api.usesocialgo.com/guest/order" \
   -H "Content-Type: application/json" \
   -d '{
     "email": "you@example.com",
@@ -1113,7 +1113,7 @@ curl -s -X POST "https://usesocialgo.com/guest/order" \
 **Example — with per-type metadata (custom comments)**
 
 ```bash
-curl -s -X POST "https://usesocialgo.com/guest/order" \
+curl -s -X POST "https://api.usesocialgo.com/guest/order" \
   -H "Content-Type: application/json" \
   -d '{
     "email": "you@example.com",
@@ -1175,13 +1175,13 @@ Public status of a guest order. Ownership is validated with `token` (preferred) 
 **Example — by token (recommended)**
 
 ```bash
-curl -s "https://usesocialgo.com/guest/order/gord_abc123?token=gtok_xyz789"
+curl -s "https://api.usesocialgo.com/guest/order/gord_abc123?token=gtok_xyz789"
 ```
 
 **Example — by email**
 
 ```bash
-curl -s "https://usesocialgo.com/guest/order/gord_abc123?email=you@example.com"
+curl -s "https://api.usesocialgo.com/guest/order/gord_abc123?email=you@example.com"
 ```
 
 ---

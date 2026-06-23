@@ -28,13 +28,18 @@ pnpm build          # compiles packages/mcp → packages/mcp/dist/index.js
 ```
 
 Smoke-test (prints a readiness line to stderr, then waits for an MCP client over
-stdin — Ctrl-C to exit):
+stdin — Ctrl-C to exit). **No API key needed for guest mode:**
 
 ```bash
-SOCIALGO_API_URL="https://usesocialgo.com" \
-SOCIALGO_API_KEY="your-api-key-here" \
+# Guest mode (no account / no key) — the guest tools are fully keyless:
+SOCIALGO_API_URL="https://api.usesocialgo.com" \
 node <repo>/packages/mcp/dist/index.js
 # stderr: [socialgo-mcp] MCP server ready (stdio).
+
+# Reseller mode (account) — add your key only if you have an account:
+SOCIALGO_API_URL="https://api.usesocialgo.com" \
+SOCIALGO_API_KEY="your-api-key-here" \
+node <repo>/packages/mcp/dist/index.js
 ```
 
 Requires Node.js ≥ 18. Replace `<repo>` with your clone path.
@@ -49,6 +54,8 @@ Add to `claude_desktop_config.json`
 (`~/Library/Application Support/Claude/` on macOS, `%APPDATA%\Claude\` on
 Windows):
 
+**Guest mode (no account / no key)** — set only the URL:
+
 ```jsonc
 {
   "mcpServers": {
@@ -56,7 +63,23 @@ Windows):
       "command": "node",
       "args": ["<repo>/packages/mcp/dist/index.js"],
       "env": {
-        "SOCIALGO_API_URL": "https://usesocialgo.com",
+        "SOCIALGO_API_URL": "https://api.usesocialgo.com"
+      }
+    }
+  }
+}
+```
+
+**Reseller mode (account)** — add your key (only if you have an account):
+
+```jsonc
+{
+  "mcpServers": {
+    "socialgo": {
+      "command": "node",
+      "args": ["<repo>/packages/mcp/dist/index.js"],
+      "env": {
+        "SOCIALGO_API_URL": "https://api.usesocialgo.com",
         "SOCIALGO_API_KEY": "your-api-key-here"
       }
     }
@@ -71,8 +94,14 @@ lives at
 ### Claude Code
 
 ```bash
+# Guest mode (no key needed):
 claude mcp add socialgo \
-  --env SOCIALGO_API_URL=https://usesocialgo.com \
+  --env SOCIALGO_API_URL=https://api.usesocialgo.com \
+  -- node <repo>/packages/mcp/dist/index.js
+
+# Reseller mode (add your key only if you have an account):
+claude mcp add socialgo \
+  --env SOCIALGO_API_URL=https://api.usesocialgo.com \
   --env SOCIALGO_API_KEY=your-api-key-here \
   -- node <repo>/packages/mcp/dist/index.js
 ```
@@ -89,16 +118,20 @@ claude mcp add socialgo \
 
 Configured entirely through environment variables — no secrets in code:
 
-| Variable           | Required          | Description                                                                  |
-| ------------------ | ----------------- | ---------------------------------------------------------------------------- |
-| `SOCIALGO_API_URL` | Recommended       | Base URL of your panel (e.g. `https://usesocialgo.com`). SMM v2 lives at `${SOCIALGO_API_URL}/api/v2`. Defaults to `https://usesocialgo.com`. |
-| `SOCIALGO_API_KEY` | For reseller mode | Your API key, from **Dashboard › API Key**. The guest tools do **not** need it. |
+| Variable           | Required    | Description                                                                  |
+| ------------------ | ----------- | ---------------------------------------------------------------------------- |
+| `SOCIALGO_API_URL` | Optional    | Base URL of your panel (e.g. `https://api.usesocialgo.com`). SMM v2 lives at `${SOCIALGO_API_URL}/api/v2`. Defaults to `https://api.usesocialgo.com`. |
+| `SOCIALGO_API_KEY` | **Optional** | Your API key, from **Dashboard › API Key**. Needed **only** for reseller tools (balance, place_order, wallet, …). The guest tools (`socialgo_guest_*`) are fully keyless — the server runs without any key. |
 
-**Two purchasing modes:**
+**Two purchasing modes — how the AI should choose:**
 
-- **Reseller / account** — uses your API key and wallet balance.
-- **Guest** — buy without an account, pay-per-order, identified by email. Uses
-  public `/guest/*` endpoints; needs no API key.
+- **Guest (no account / no key)** — buy without an account, pay-per-order,
+  identified by email. **No API key required.** Funnel: `socialgo_guest_services`
+  → `socialgo_guest_gateways` → `socialgo_guest_order` → `socialgo_guest_order_status`,
+  all over the public `/guest/*` endpoints. Use this whenever the user has no
+  account or you have no key.
+- **Reseller (account)** — uses your API key and wallet balance for the
+  non-`guest` tools. Use only when authenticated with a key.
 
 > **Never commit a real API key.**
 
@@ -107,23 +140,32 @@ Configured entirely through environment variables — no secrets in code:
 ## Tools
 
 A small, fixed toolset (a **search-then-act** design): the model searches the
-catalog with `socialgo_services`, then acts on a `service` id. This keeps the
-number of tools constant no matter how big the catalog is.
+catalog (keyless `socialgo_guest_services` for guest mode, or `socialgo_services`
+with a key for reseller mode), then acts on a service id. This keeps the number
+of tools constant no matter how big the catalog is.
 
-| Tool | Mode | Purpose |
-| ---- | ---- | ------- |
-| `socialgo_balance` | Reseller | Current account balance + currency. |
-| `socialgo_services` | Reseller | Search/filter the catalog by natural-language intent. |
-| `socialgo_service_details` | Reseller | Full details of one service by id. |
-| `socialgo_place_order` | Reseller | Create an order (with per-type params + drip-feed). |
-| `socialgo_order_status` | Reseller | Status of one or many orders. |
-| `socialgo_refill` | Reseller | Request a refill for one or many orders. |
-| `socialgo_refill_status` | Reseller | Status of a refill (by refill id or order id). |
-| `socialgo_cancel` | Reseller | Cancel one or many orders. |
-| `socialgo_orders` | Reseller | Account order history. |
-| `socialgo_guest_gateways` | Guest | List active payment methods for guest checkout. |
-| `socialgo_guest_order` | Guest | Buy without an account; returns a payment URL. |
-| `socialgo_guest_order_status` | Guest | Track a guest order by token or email. |
+**Guest tools need no API key** — start with these when the user has no account.
+
+| Tool | Mode | Key? | Purpose |
+| ---- | ---- | ---- | ------- |
+| `socialgo_guest_services` | Guest | No | **Start here (no account):** search the public catalog to find a `serviceId`. |
+| `socialgo_guest_gateways` | Guest | No | List active payment methods for guest checkout. |
+| `socialgo_guest_order` | Guest | No | Buy without an account; returns a payment URL (pay-per-order). |
+| `socialgo_guest_order_status` | Guest | No | Track a guest order by token or email. |
+| `socialgo_balance` | Reseller | Yes | Current account balance + currency. |
+| `socialgo_services` | Reseller | Yes | Search/filter the catalog by natural-language intent. |
+| `socialgo_service_details` | Reseller | Yes | Full details of one service by id. |
+| `socialgo_place_order` | Reseller | Yes | Create an order from account balance (per-type params + drip-feed). |
+| `socialgo_order_status` | Reseller | Yes | Status of one or many account orders. |
+| `socialgo_refill` | Reseller | Yes | Request a refill for one or many orders. |
+| `socialgo_refill_status` | Reseller | Yes | Status of a refill (by refill id or order id). |
+| `socialgo_cancel` | Reseller | Yes | Cancel one or many orders. |
+| `socialgo_orders` | Reseller | Yes | Account order history. |
+
+(Plus reseller-only `socialgo_wallet`, `socialgo_add_funds`, `socialgo_mass_order`,
+`socialgo_create_subscription`, `socialgo_subscriptions`, `socialgo_validate_coupon`,
+`socialgo_affiliate_stats`, `socialgo_loyalty_status`, `socialgo_recommend`,
+`socialgo_build_campaign`, `socialgo_storefront` — all require a key.)
 
 Full input schemas, per-tool call/response examples, an end-to-end flow, and
 client configs for every editor are in
@@ -136,8 +178,8 @@ client configs for every editor are in
 > **User:** I want 500 views on my latest TikTok video. My email is
 > `buyer@example.com` and I'd like to pay with PIX.
 
-1. Assistant calls `socialgo_services` (`query: "tiktok views"`,
-   `platform: "TikTok"`), picks a service, confirms limits.
+1. Assistant calls `socialgo_guest_services` (no key needed) (`query: "tiktok views"`,
+   `platform: "tiktok"`), picks a service by its `id`, confirms limits.
 2. Assistant calls `socialgo_guest_gateways` and offers only the active methods
    (`mercadopago` covers PIX).
 3. Assistant calls `socialgo_guest_order`:

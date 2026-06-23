@@ -1,11 +1,20 @@
 {
-  "_comment": "Example MCP client config for the SocialGO MCP server. Drop the `socialgo` entry into your MCP-capable client's config (e.g. Claude Desktop's claude_desktop_config.json, under `mcpServers`). Replace the env values with your own. SOCIALGO_API_KEY is required for catalog/reseller tools; the guest tools (socialgo_guest_order, socialgo_guest_order_status) work without it but the server still reads it for the other tools. NEVER commit a real API key.",
+  "_comment": "Example MCP client config for the SocialGO MCP server. Drop one `socialgo` entry into your MCP-capable client's config (e.g. Claude Desktop's claude_desktop_config.json, under `mcpServers`). SOCIALGO_API_KEY is FULLY OPTIONAL: the server runs without it and the guest tools (socialgo_guest_services, socialgo_guest_gateways, socialgo_guest_order, socialgo_guest_order_status) are 100% keyless — use them to buy without an account. The key is needed ONLY for reseller/account tools (balance, place_order, wallet, ...). Pick ONE of the two blocks below. NEVER commit a real API key.",
   "mcpServers": {
+    "_guest_mode_no_key": "Use this when you have NO account / NO API key. Set only SOCIALGO_API_URL. The guest tools work without any key.",
     "socialgo": {
       "command": "npx",
       "args": ["-y", "@socialgo/mcp"],
       "env": {
-        "SOCIALGO_API_URL": "https://usesocialgo.com",
+        "SOCIALGO_API_URL": "https://api.usesocialgo.com"
+      }
+    },
+    "_reseller_mode_with_key": "Use this INSTEAD of the block above only if you have an account. Rename it to `socialgo` and add SOCIALGO_API_KEY from Dashboard > API Key.",
+    "socialgo-reseller": {
+      "command": "npx",
+      "args": ["-y", "@socialgo/mcp"],
+      "env": {
+        "SOCIALGO_API_URL": "https://api.usesocialgo.com",
         "SOCIALGO_API_KEY": "your-api-key-here"
       }
     }

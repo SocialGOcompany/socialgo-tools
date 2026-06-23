@@ -137,7 +137,7 @@ You configure the client with two values, usually sourced from environment varia
 
 | Variable           | Maps to  | Description                                                                                |
 | ------------------ | -------- | ------------------------------------------------------------------------------------------ |
-| `SOCIALGO_API_URL` | `apiUrl` | Base URL of the panel, e.g. `https://usesocialgo.com`. The SDK posts to `{apiUrl}/api/v2`. |
+| `SOCIALGO_API_URL` | `apiUrl` | Base URL of the panel, e.g. `https://api.usesocialgo.com`. The SDK posts to `{apiUrl}/api/v2`. |
 | `SOCIALGO_API_KEY` | `apiKey` | Your account key, obtained from the panel under `/dashboard/api-key`.                      |
 
 > **`apiUrl` is the full endpoint URL.** The client posts to exactly the URL you pass — it
@@ -794,7 +794,7 @@ A runnable version of this flow lives at
 ```bash
 pnpm install
 pnpm --filter @socialgo/sdk build
-SOCIALGO_API_URL=https://usesocialgo.com \
+SOCIALGO_API_URL=https://api.usesocialgo.com \
 SOCIALGO_API_KEY=your-key \
 npx tsx examples/place-order.ts \
   --query "instagram followers" \

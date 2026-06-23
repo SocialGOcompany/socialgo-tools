@@ -11,11 +11,11 @@ ever sent. This mirrors examples/guest-order.sh, but in Python with `requests`:
     4. GET  /guest/order/:id       track the order with the returned token
 
 Config via environment / args:
-    SOCIALGO_API_URL   base URL of your panel (e.g. https://usesocialgo.com)
+    SOCIALGO_API_URL   base URL of your panel (e.g. https://api.usesocialgo.com)
 
 Install the one dependency, then run:
     pip install requests
-    SOCIALGO_API_URL=https://usesocialgo.com \\
+    SOCIALGO_API_URL=https://api.usesocialgo.com \\
     python examples/guest-order.py \\
         --email you@example.com \\
         --link https://instagram.com/yourprofile \\

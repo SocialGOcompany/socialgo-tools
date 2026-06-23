@@ -10,7 +10,7 @@ Common issues and how to fix them. If your problem isn't here, check the
 Account-mode commands and most MCP tools need an API key.
 
 ```bash
-export SOCIALGO_API_URL="https://usesocialgo.com"
+export SOCIALGO_API_URL="https://api.usesocialgo.com"
 export SOCIALGO_API_KEY="your-api-key"
 ```
 

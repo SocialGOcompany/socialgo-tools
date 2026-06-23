@@ -13,12 +13,12 @@
  *   node monitor-order.ts --order 98765 && echo "delivered!"
  *
  * Config via environment:
- *   SOCIALGO_API_URL   base URL of your panel (e.g. https://usesocialgo.com)
+ *   SOCIALGO_API_URL   base URL of your panel (e.g. https://api.usesocialgo.com)
  *   SOCIALGO_API_KEY   your reseller API key (from /dashboard/api-key)
  *
  * Run (from the repo root, after `pnpm install`):
  *   pnpm --filter @socialgo/sdk build
- *   SOCIALGO_API_URL=https://usesocialgo.com \
+ *   SOCIALGO_API_URL=https://api.usesocialgo.com \
  *   SOCIALGO_API_KEY=YOUR_API_KEY \
  *   npx tsx examples/monitor-order.ts --order 98765 --quantity 1000 --interval 15 --timeout 3600
  */

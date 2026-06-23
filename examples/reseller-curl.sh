@@ -17,7 +17,7 @@
 # Requires: bash, curl, and jq (for parsing JSON).
 #
 # Usage:
-#   SOCIALGO_API_URL=https://usesocialgo.com \
+#   SOCIALGO_API_URL=https://api.usesocialgo.com \
 #   SOCIALGO_API_KEY=YOUR_API_KEY \
 #   LINK=https://instagram.com/yourprofile \
 #   QUANTITY=1000 \

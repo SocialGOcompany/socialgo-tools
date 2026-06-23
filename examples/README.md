@@ -25,7 +25,7 @@ wherever you see `YOUR_API_KEY`, substitute your own key.
 ## Common environment
 
 ```bash
-export SOCIALGO_API_URL="https://usesocialgo.com"   # your panel base URL
+export SOCIALGO_API_URL="https://api.usesocialgo.com"   # your panel base URL
 export SOCIALGO_API_KEY="YOUR_API_KEY"              # reseller key (from /dashboard/api-key)
 ```
 
@@ -42,7 +42,7 @@ Pure `curl` + `jq`. Browses the public catalog, creates a pay-per-order, prints 
 payment URL, and tracks the order with the returned token.
 
 ```bash
-SOCIALGO_API_URL=https://usesocialgo.com \
+SOCIALGO_API_URL=https://api.usesocialgo.com \
 EMAIL=you@example.com \
 LINK=https://instagram.com/yourprofile \
 QUANTITY=1000 \
@@ -56,7 +56,7 @@ The same flow in Python — only dependency is `requests`.
 
 ```bash
 pip install requests
-SOCIALGO_API_URL=https://usesocialgo.com \
+SOCIALGO_API_URL=https://api.usesocialgo.com \
 python examples/guest-order.py \
   --email you@example.com \
   --link https://instagram.com/yourprofile \
@@ -77,7 +77,7 @@ The whole reseller protocol is one endpoint: `POST /api/v2` with form-urlencoded
 with nothing but `curl` and `jq`, and shows `refill` / `cancel` / drip-feed in comments.
 
 ```bash
-SOCIALGO_API_URL=https://usesocialgo.com \
+SOCIALGO_API_URL=https://api.usesocialgo.com \
 SOCIALGO_API_KEY=YOUR_API_KEY \
 LINK=https://instagram.com/yourprofile \
 QUANTITY=1000 \
@@ -91,7 +91,7 @@ place the order, poll status). No SDK, no repo build needed.
 
 ```bash
 pip install requests
-SOCIALGO_API_URL=https://usesocialgo.com \
+SOCIALGO_API_URL=https://api.usesocialgo.com \
 SOCIALGO_API_KEY=YOUR_API_KEY \
 python examples/reseller.py \
   --query "instagram followers" \
@@ -116,7 +116,7 @@ Typed single-order flow: find a service, estimate cost, check balance, place the
 poll status. Run it with a TypeScript loader such as `tsx`:
 
 ```bash
-SOCIALGO_API_URL=https://usesocialgo.com \
+SOCIALGO_API_URL=https://api.usesocialgo.com \
 SOCIALGO_API_KEY=YOUR_API_KEY \
 npx tsx examples/place-order.ts \
   --query "instagram followers" \
@@ -131,7 +131,7 @@ concurrency, estimates total cost up front, checks the balance, then fetches eve
 order's status in a single batched `multiStatus` call.
 
 ```bash
-SOCIALGO_API_URL=https://usesocialgo.com \
+SOCIALGO_API_URL=https://api.usesocialgo.com \
 SOCIALGO_API_KEY=YOUR_API_KEY \
 node examples/mass-order.mjs --service 1234 --quantity 500 \
   --links https://instagram.com/a,https://instagram.com/b,https://instagram.com/c
@@ -147,7 +147,7 @@ An automation building block: polls one order until it is `Completed` / `Partial
 so it composes in shell pipelines and cron jobs.
 
 ```bash
-SOCIALGO_API_URL=https://usesocialgo.com \
+SOCIALGO_API_URL=https://api.usesocialgo.com \
 SOCIALGO_API_KEY=YOUR_API_KEY \
 npx tsx examples/monitor-order.ts \
   --order 98765 --quantity 1000 --interval 15 --timeout 3600 \

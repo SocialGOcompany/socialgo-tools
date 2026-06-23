@@ -64,10 +64,15 @@ Smoke-test it directly (it prints a readiness line to **stderr** and then waits
 for an MCP client to speak to it over stdin — press Ctrl-C to exit):
 
 ```bash
-SOCIALGO_API_URL="https://usesocialgo.com" \
-SOCIALGO_API_KEY="your-api-key-here" \
+# Guest mode (no account / no key) — guest tools are fully keyless:
+SOCIALGO_API_URL="https://api.usesocialgo.com" \
 node <repo>/packages/mcp/dist/index.js
 # stderr: [socialgo-mcp] MCP server ready (stdio).
+
+# Reseller mode (account) — add the key only if you have an account:
+SOCIALGO_API_URL="https://api.usesocialgo.com" \
+SOCIALGO_API_KEY="your-api-key-here" \
+node <repo>/packages/mcp/dist/index.js
 ```
 
 > Replace `<repo>` with the absolute path where you cloned `socialgo-tools`
@@ -85,19 +90,20 @@ node <repo>/packages/mcp/dist/index.js
 
 All configuration comes from the environment:
 
-| Variable           | Required          | Description                                                                 |
-| ------------------ | ----------------- | --------------------------------------------------------------------------- |
-| `SOCIALGO_API_URL` | Recommended       | Base URL of your SocialGO panel (e.g. `https://usesocialgo.com`). The SMM v2 endpoint is `${SOCIALGO_API_URL}/api/v2`. Defaults to `https://usesocialgo.com` if unset. |
-| `SOCIALGO_API_KEY` | For reseller mode | Your API key, from **Dashboard › API Key**. Required by every reseller tool. The guest tools do **not** use it. |
+| Variable           | Required     | Description                                                                 |
+| ------------------ | ------------ | --------------------------------------------------------------------------- |
+| `SOCIALGO_API_URL` | Optional     | Base URL of your SocialGO panel (e.g. `https://api.usesocialgo.com`). The SMM v2 endpoint is `${SOCIALGO_API_URL}/api/v2`. Defaults to `https://api.usesocialgo.com` if unset. |
+| `SOCIALGO_API_KEY` | **Optional** | Your API key, from **Dashboard › API Key**. Needed **only** for reseller tools. The guest tools (`socialgo_guest_*`) are fully keyless — the server runs without any key. |
 
-Two purchasing modes are supported:
+Two purchasing modes are supported — the AI should choose by context:
 
+- **Guest mode (no account / no key)** — buy **without an account**, pay-per-order,
+  identified only by an email. **No API key required.** Keyless funnel:
+  `socialgo_guest_services` (find the `serviceId`) → `socialgo_guest_gateways` →
+  `socialgo_guest_order` → `socialgo_guest_order_status`, all over the public
+  `/guest/*` endpoints. Use this whenever the user has no account / you have no key.
 - **Reseller / account mode** — uses your `SOCIALGO_API_KEY` and your wallet
-  balance. All tools except the guest ones operate in this mode.
-- **Guest mode** — buy **without an account**, pay-per-order, identified only by
-  an email. Uses the public `/guest/*` endpoints and needs **no API key**
-  (`socialgo_guest_gateways`, `socialgo_guest_order`,
-  `socialgo_guest_order_status`).
+  balance. The non-`guest` tools operate in this mode. Use only when authenticated.
 
 > **Never commit a real API key.** Keep it in your client's `env` block or a
 > local secrets store. A ready-to-edit template lives at
@@ -109,17 +115,24 @@ Two purchasing modes are supported:
 
 Every MCP client launches the server the same way — a `command` plus `args` plus
 an `env` block. The blocks below are copy-pasteable; just replace `<repo>` with
-your clone path and `your-api-key-here` with your key.
+your clone path.
 
-> The shape used everywhere is the standard MCP `stdioServer` form:
+> **`SOCIALGO_API_KEY` is optional.** For **guest mode (no account / no key)**,
+> OMIT the `SOCIALGO_API_KEY` line entirely — the guest tools are keyless. Only
+> add the key (replacing `your-api-key-here`) if you have an account and want the
+> reseller tools. The config blocks below show the key for completeness; drop that
+> line for a key-free guest setup.
+
+> The shape used everywhere is the standard MCP `stdioServer` form (the
+> `SOCIALGO_API_KEY` line is optional — omit it for guest mode):
 >
 > ```jsonc
 > {
 >   "command": "node",
 >   "args": ["<repo>/packages/mcp/dist/index.js"],
 >   "env": {
->     "SOCIALGO_API_URL": "https://usesocialgo.com",
->     "SOCIALGO_API_KEY": "your-api-key-here"
+>     "SOCIALGO_API_URL": "https://api.usesocialgo.com"
+>     // "SOCIALGO_API_KEY": "your-api-key-here"  // OPTIONAL — only for reseller/account tools
 >   }
 > }
 > ```
@@ -142,7 +155,7 @@ Edit `claude_desktop_config.json`:
       "command": "node",
       "args": ["<repo>/packages/mcp/dist/index.js"],
       "env": {
-        "SOCIALGO_API_URL": "https://usesocialgo.com",
+        "SOCIALGO_API_URL": "https://api.usesocialgo.com",
         "SOCIALGO_API_KEY": "your-api-key-here"
       }
     }
@@ -159,7 +172,7 @@ Register it with one command (no JSON file to edit):
 
 ```bash
 claude mcp add socialgo \
-  --env SOCIALGO_API_URL=https://usesocialgo.com \
+  --env SOCIALGO_API_URL=https://api.usesocialgo.com \
   --env SOCIALGO_API_KEY=your-api-key-here \
   -- node <repo>/packages/mcp/dist/index.js
 ```
@@ -182,7 +195,7 @@ Add the server to Cursor's MCP config — `~/.cursor/mcp.json` (global) or
       "command": "node",
       "args": ["<repo>/packages/mcp/dist/index.js"],
       "env": {
-        "SOCIALGO_API_URL": "https://usesocialgo.com",
+        "SOCIALGO_API_URL": "https://api.usesocialgo.com",
         "SOCIALGO_API_KEY": "your-api-key-here"
       }
     }
@@ -204,7 +217,7 @@ Open Cline's MCP settings (**Cline › MCP Servers › Configure**, which edits
       "command": "node",
       "args": ["<repo>/packages/mcp/dist/index.js"],
       "env": {
-        "SOCIALGO_API_URL": "https://usesocialgo.com",
+        "SOCIALGO_API_URL": "https://api.usesocialgo.com",
         "SOCIALGO_API_KEY": "your-api-key-here"
       },
       "disabled": false
@@ -225,7 +238,7 @@ Servers › Add server**):
       "command": "node",
       "args": ["<repo>/packages/mcp/dist/index.js"],
       "env": {
-        "SOCIALGO_API_URL": "https://usesocialgo.com",
+        "SOCIALGO_API_URL": "https://api.usesocialgo.com",
         "SOCIALGO_API_KEY": "your-api-key-here"
       }
     }
@@ -246,7 +259,7 @@ Create `.vscode/mcp.json` in your workspace (note VS Code uses a top-level
       "command": "node",
       "args": ["<repo>/packages/mcp/dist/index.js"],
       "env": {
-        "SOCIALGO_API_URL": "https://usesocialgo.com",
+        "SOCIALGO_API_URL": "https://api.usesocialgo.com",
         "SOCIALGO_API_KEY": "your-api-key-here"
       }
     }
@@ -286,10 +299,11 @@ reads the figures back to you in the language you used.
 | `socialgo_validate_coupon` | Reseller | Preview a coupon without redeeming it. | `code` |
 | `socialgo_affiliate_stats` | Reseller | The user's own referral link and affiliate numbers. | _(none)_ |
 | `socialgo_loyalty_status` | Reseller | The user's loyalty tier, points and progress. | _(none)_ |
-| `socialgo_storefront` | Public | Resolve a public storefront by slug with its packages. | `slug` |
-| `socialgo_guest_gateways` | Guest | List active payment methods for guest checkout. | _(none)_ |
-| `socialgo_guest_order` | Guest | Buy without an account; returns a payment URL. | `email`, `serviceId`, `link` |
-| `socialgo_guest_order_status` | Guest | Track a guest order by token or email. | `id` + (`token` or `email`) |
+| `socialgo_storefront` | Reseller | Resolve a public storefront by slug with its packages. Read through the reseller API — needs a key. | `slug` |
+| `socialgo_guest_services` | Guest (no key) | **Start here (no account):** search the public catalog to find a `serviceId`. | _(none)_ |
+| `socialgo_guest_gateways` | Guest (no key) | List active payment methods for guest checkout. | _(none)_ |
+| `socialgo_guest_order` | Guest (no key) | Buy without an account; returns a payment URL. | `email`, `serviceId`, `link` |
+| `socialgo_guest_order_status` | Guest (no key) | Track a guest order by token or email. | `id` + (`token` or `email`) |
 
 ---
 
@@ -797,7 +811,31 @@ reference — the charged amount is recomputed server-side.
 
 These tools buy **without an account** (pay-per-order). They hit the public
 `/guest/*` endpoints and do **not** use `SOCIALGO_API_KEY`, so they work even
-without a reseller key configured.
+without a reseller key configured. The guest funnel is:
+`socialgo_guest_services` → `socialgo_guest_gateways` → `socialgo_guest_order` →
+`socialgo_guest_order_status`.
+
+#### `socialgo_guest_services`
+
+**Start here when the user has no account / you have no key.** Searches the
+**public** catalog (`GET /guest/services`) to find the `serviceId` for
+`socialgo_guest_order` — no API key required. This is the keyless equivalent of
+`socialgo_services`: use this one in the guest flow, and `socialgo_services` only
+when authenticated with a key. Filters server-side by `platform` and/or `query`.
+
+| Input | Type | Required | Description |
+| ----- | ---- | -------- | ----------- |
+| `query` | string | No | Search term, e.g. `"instagram followers"`. Empty = general (limited) list. |
+| `platform` | string | No | Platform filter, e.g. `"instagram"`, `"tiktok"`, `"youtube"`. |
+| `limit` | number | No | Max services to return (1–100, default 20). |
+
+Returns `{ count, total, services: [{ id, name, type, platform, sellRate, min,
+max, refill, cancel, dripfeed }] }`. The `id` is the `serviceId` for
+`socialgo_guest_order`.
+
+> _"Find me cheap Instagram followers — I don't have an account."_
+
+---
 
 #### `socialgo_guest_gateways`
 
@@ -841,7 +879,7 @@ complete payment.
 | Input | Type | Required | Description |
 | ----- | ---- | -------- | ----------- |
 | `email` | string (email) | Yes | Buyer's email. Used to find/create a guest user and to track the order. |
-| `serviceId` | string | Yes | Id of the service to buy (from `socialgo_services`). |
+| `serviceId` | string | Yes | Id of the service to buy. Get it from `socialgo_guest_services` (no key needed); only use `socialgo_services` if authenticated with a key. |
 | `link` | string | Yes | Target link of the order (profile, post, video, etc.). |
 | `quantity` | integer > 0 | No | Desired quantity, within the service's min/max. For list types it is derived from the lines in `metadata`. |
 | `method` | string | No | Payment gateway — the `gateway` value from `socialgo_guest_gateways`. **Not a fixed list.** Validated against the panel's active gateways at call time. If omitted, the first active gateway is used. |
@@ -925,17 +963,18 @@ A complete conversation, no account required:
 > **User:** I want 500 views on my latest TikTok video. My email is
 > `buyer@example.com` and I'd like to pay with PIX.
 
-1. **Search.** The assistant calls **`socialgo_services`** with
-   `query: "tiktok views"`, `platform: "TikTok"` and picks a service from the
-   result, e.g. service `872` (rate, min, max all checked):
+1. **Search (no key).** Because the user has no account, the assistant calls
+   **`socialgo_guest_services`** (keyless) with `query: "tiktok views"`,
+   `platform: "tiktok"` and picks a service from the result, e.g. `id: "872"`
+   (rate, min, max all checked):
 
    ```jsonc
    // call
-   { "query": "tiktok views", "platform": "TikTok", "limit": 3 }
+   { "query": "tiktok views", "platform": "tiktok", "limit": 3 }
    // → response (trimmed)
    { "count": 1, "total": 4821, "services": [
-     { "service": 872, "name": "TikTok Views", "type": "Default",
-       "category": "TikTok Views", "rate": "0.24", "min": "100", "max": "1000000" }
+     { "id": "872", "name": "TikTok Views", "type": "Default",
+       "platform": "tiktok", "sellRate": "0.24", "min": 100, "max": 1000000 }
    ] }
    ```
 

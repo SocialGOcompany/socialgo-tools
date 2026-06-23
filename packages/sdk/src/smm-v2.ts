@@ -308,7 +308,14 @@ export interface SmmStorefront {
 
 export interface SmmV2ClientOptions {
   apiUrl: string;
-  apiKey: string;
+  /**
+   * Chave de revendedor. OPCIONAL: só é exigida para as actions de REVENDEDOR
+   * (services/add/balance/wallet/…). O cliente pode ser construído sem chave
+   * para usos keyless (ex.: catálogo/guest checkout via endpoints públicos
+   * `/guest/*`, que NÃO passam por este protocolo). Uma action de revendedor
+   * sem chave lança SmmV2Error em runtime — não no construtor.
+   */
+  apiKey?: string;
   /** timeout em ms (default 30000) */
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
@@ -330,12 +337,25 @@ export class SmmV2Client {
 
   constructor(opts: SmmV2ClientOptions) {
     this.apiUrl = opts.apiUrl;
-    this.apiKey = opts.apiKey;
+    // Chave opcional: o construtor NUNCA falha sem ela (permite usos keyless).
+    // A exigência é deferida para a 1ª action de revendedor (ver call()).
+    this.apiKey = opts.apiKey ?? "";
     this.timeoutMs = opts.timeoutMs ?? 30_000;
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
 
+  /** true se há chave de revendedor configurada (sem expô-la). */
+  get hasKey(): boolean {
+    return Boolean(this.apiKey);
+  }
+
   private async call<T>(action: SmmAction, params: Record<string, unknown> = {}): Promise<T> {
+    if (!this.apiKey) {
+      throw new SmmV2Error(
+        `Action de revendedor "${action}" requer apiKey. Para fluxos sem conta/sem chave, ` +
+          `use os endpoints públicos /guest/* (catálogo + guest checkout), que não usam este protocolo.`,
+      );
+    }
     const body = new URLSearchParams({ key: this.apiKey, action });
     for (const [k, v] of Object.entries(params)) {
       if (v !== undefined && v !== null) body.set(k, String(v));

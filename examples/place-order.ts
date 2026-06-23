@@ -10,11 +10,11 @@
  *   5. polls the order status until it leaves "Pending".
  *
  * Config via environment:
- *   SOCIALGO_API_URL   base URL of your panel (e.g. https://usesocialgo.com)
+ *   SOCIALGO_API_URL   base URL of your panel (e.g. https://api.usesocialgo.com)
  *   SOCIALGO_API_KEY   your reseller API key (from /dashboard/api-key)
  *
  * Run (from the repo root, after `pnpm install`):
- *   SOCIALGO_API_URL=https://usesocialgo.com \
+ *   SOCIALGO_API_URL=https://api.usesocialgo.com \
  *   SOCIALGO_API_KEY=your-key \
  *   pnpm --filter @socialgo/sdk build && \
  *   node --experimental-strip-types examples/place-order.ts \

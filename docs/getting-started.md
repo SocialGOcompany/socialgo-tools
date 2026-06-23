@@ -23,7 +23,7 @@ If you only want a quick taste, the [README](../README.md) has copy-paste quicks
 ## Requirements
 
 - **Node.js 18 or newer** (the toolkit uses the built-in `fetch`).
-- A **SocialGO panel URL** (for example `https://usesocialgo.com`).
+- A **SocialGO API base URL** (for example `https://api.usesocialgo.com`).
 - An **API key** — only for account mode. Guest mode needs no key.
 
 ---
@@ -75,7 +75,7 @@ Both the CLI and the MCP server read the same two variables:
 Set them in your shell:
 
 ```bash
-export SOCIALGO_API_URL="https://usesocialgo.com"
+export SOCIALGO_API_URL="https://api.usesocialgo.com"
 export SOCIALGO_API_KEY="your-api-key"
 ```
 
@@ -89,11 +89,11 @@ socialgo config
 
 ```
 Configuração SocialGO CLI
-  API URL  https://usesocialgo.com
+  API URL  https://api.usesocialgo.com
   Chave    definida
 ```
 
-> **Per-command override.** Instead of environment variables, you can pass `--api-url` and `--key` as global flags on any command, e.g. `socialgo --key abc --api-url https://usesocialgo.com balance`.
+> **Per-command override.** Instead of environment variables, you can pass `--api-url` and `--key` as global flags on any command, e.g. `socialgo --key abc --api-url https://api.usesocialgo.com balance`.
 
 ---
 
@@ -269,7 +269,7 @@ The `@socialgo/mcp` server lets AI assistants search services and place orders f
 
 ```bash
 claude mcp add socialgo \
-  --env SOCIALGO_API_URL=https://usesocialgo.com \
+  --env SOCIALGO_API_URL=https://api.usesocialgo.com \
   --env SOCIALGO_API_KEY=your-api-key \
   -- npx -y @socialgo/mcp
 ```
@@ -283,7 +283,7 @@ claude mcp add socialgo \
       "command": "npx",
       "args": ["-y", "@socialgo/mcp"],
       "env": {
-        "SOCIALGO_API_URL": "https://usesocialgo.com",
+        "SOCIALGO_API_URL": "https://api.usesocialgo.com",
         "SOCIALGO_API_KEY": "your-api-key"
       }
     }
