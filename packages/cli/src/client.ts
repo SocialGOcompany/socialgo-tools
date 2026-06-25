@@ -8,9 +8,18 @@
  * Tipos reaproveitados do SDK compartilhado (`@socialgo/sdk`) — o mesmo
  * coração usado por api/web/mcp.
  */
+import { randomUUID } from "node:crypto";
 import type { SmmService, SmmOrderStatus } from "@socialgo/sdk";
 
 const DEFAULT_BASE = "https://api.usesocialgo.com";
+
+/**
+ * Valida o formato UUID v1-v5 (mesmo que a coluna `users.id` aceita no Postgres
+ * e que o MCP já exige com `z.string().uuid()`). Usado para falhar limpo ANTES
+ * de bater na API com um id malformado — senão o Postgres dispara 22P02 e o
+ * usuário recebe um 500 cru em vez de um erro de validação claro.
+ */
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Item do catálogo como a reseller API v2 do SocialGO devolve em `services`. */
 export interface CatalogService extends SmmService {
@@ -288,7 +297,41 @@ export class SocialGoApiError extends Error {
 export interface SocialGoClientOptions {
   baseUrl?: string;
   apiKey?: string;
+  /**
+   * Token de SESSÃO do usuário (JWT Bearer), distinto de `apiKey`. Usado SÓ pelas
+   * rotas AUTENTICADAS de gestão/acompanhamento (sub-revenda, pontos, plano de
+   * revendedor), que rodam sob `requireUser` no painel. Default: SOCIALGO_TOKEN
+   * (ou SOCIALGO_USER_TOKEN) do ambiente. Nunca hard-coded.
+   */
+  token?: string;
   timeoutMs?: number;
+}
+
+// ---- Rotas AUTENTICADAS (login de usuário — gestão/acompanhamento) ---------
+
+/** Resumo do painel-filho do sub-revendedor (`GET /sub-reseller/`). */
+export interface SubDashboard {
+  balance?: string;
+  markupPercent?: number;
+  markupCap?: number;
+  clientCount?: number;
+  orderCount?: number;
+  [k: string]: unknown;
+}
+
+/** Cliente vinculado ao sub-revendedor (`GET /sub-reseller/clients`). */
+export interface SubClient {
+  id: string;
+  email: string;
+  name: string | null;
+  createdAt?: string;
+  [k: string]: unknown;
+}
+
+/** Código + URL de convite self-service (`GET /sub-reseller/invite`). */
+export interface SubInvite {
+  code: string;
+  url: string;
 }
 
 // ---- Guest checkout (endpoints PÚBLICOS, sem chave) ------------------------
@@ -395,6 +438,39 @@ export interface GuestServiceListResult {
   total: number;
 }
 
+/**
+ * Item recomendado pelo cross-sell PÚBLICO (`GET /guest/recommendations` e
+ * `GET /guest/services/:id/recommendations`). Keyless — mesmo formato REST do
+ * catálogo guest + um `reason` indicando de onde veio a sugestão.
+ */
+export interface GuestRecommendedService {
+  id: string;
+  name: string;
+  slug?: string;
+  platform?: string | null;
+  categoryName?: string | null;
+  sellRate?: string;
+  min?: number;
+  max?: number;
+  refill?: boolean;
+  /** Origem da recomendação (para a UI escolher o rótulo). */
+  reason?: "bought_together" | "same_platform" | "popular";
+}
+
+/** Filtros do cross-sell público (`GET /guest/recommendations`). */
+export interface GuestRecommendFilters {
+  serviceId?: string;
+  platform?: string;
+  limit?: number;
+}
+
+/** Resposta de `POST /affiliates/request-payout` (saque solicitado). */
+export interface AffiliatePayoutRequest {
+  id: string;
+  amount: string;
+  status: string;
+}
+
 /** Campos extras por tipo enviados no `add` (mesmos nomes do protocolo v2). */
 const ORDER_TYPE_FIELDS: Array<keyof OrderTypeParams> = [
   "comments",
@@ -413,11 +489,14 @@ const ORDER_TYPE_FIELDS: Array<keyof OrderTypeParams> = [
 export class SocialGoClient {
   private readonly baseUrl: string;
   private readonly apiKey: string;
+  private readonly token: string;
   private readonly timeoutMs: number;
 
   constructor(opts: SocialGoClientOptions = {}) {
     this.baseUrl = (opts.baseUrl ?? process.env.SOCIALGO_API_URL ?? DEFAULT_BASE).replace(/\/+$/, "");
     this.apiKey = opts.apiKey ?? process.env.SOCIALGO_API_KEY ?? "";
+    this.token =
+      opts.token ?? process.env.SOCIALGO_TOKEN ?? process.env.SOCIALGO_USER_TOKEN ?? "";
     this.timeoutMs = opts.timeoutMs ?? 30_000;
   }
 
@@ -429,6 +508,11 @@ export class SocialGoClient {
   /** Indica se há chave configurada (sem expô-la). */
   get hasKey(): boolean {
     return Boolean(this.apiKey);
+  }
+
+  /** Indica se há token de usuário (JWT) configurado (sem expô-lo). */
+  get hasToken(): boolean {
+    return Boolean(this.token);
   }
 
   /** Chamada genérica ao endpoint de revendedor SMM API v2. */
@@ -799,6 +883,284 @@ export class SocialGoClient {
     return this.guestRequest<GuestOrderStatus>(`/guest/order/${encodeURIComponent(id)}`, {
       query: { token: creds.token, email: creds.email },
     });
+  }
+
+  /**
+   * Cross-sell PÚBLICO (keyless): sugere próximos serviços a partir de um
+   * `serviceId` âncora e/ou `platform`. Espelha o caminho guest-first do site
+   * (`GET /guest/services/:id/recommendations` quando há `serviceId`; senão
+   * `GET /guest/recommendations`). NÃO usa chave nem login — é o par guest do
+   * `recommend()` (que é modo revendedor). Sem âncora, devolve populares.
+   */
+  async guestRecommend(filters: GuestRecommendFilters = {}): Promise<GuestRecommendedService[]> {
+    const { serviceId, platform, limit } = filters;
+    const path =
+      serviceId !== undefined
+        ? `/guest/services/${encodeURIComponent(serviceId)}/recommendations`
+        : "/guest/recommendations";
+    // No atalho por id (/services/:id/recommendations), serviceId vai no path;
+    // só platform/limit viram query. No genérico, serviceId também é query.
+    const query =
+      serviceId !== undefined ? { limit } : { serviceId, platform, limit };
+    const res = await this.guestRequest<{ items?: GuestRecommendedService[] }>(path, { query });
+    return Array.isArray(res?.items) ? res.items : [];
+  }
+
+  // ---- AUTENTICADAS (login de usuário — gestão/acompanhamento) --------------
+  //
+  // Rotas REST do painel sob `requireUser` (JWT Bearer do usuário logado). NÃO
+  // usam a `key` do protocolo SMM v2 nem são keyless: precisam de SOCIALGO_TOKEN.
+  // Cobrem o painel-filho de sub-revenda, a gamificação (pontos) e a compra do
+  // plano de revendedor — features de GESTÃO, distintas do funil guest de compra.
+
+  /**
+   * Chamada genérica às rotas AUTENTICADAS (`Authorization: Bearer <JWT>`).
+   * 401/403 viram mensagens claras (token ausente/expirado, ou sem permissão).
+   */
+  private async authRequest<T>(
+    path: string,
+    opts: { method?: "GET" | "POST" | "PATCH"; body?: unknown } = {},
+  ): Promise<T> {
+    if (!this.token) {
+      throw new SocialGoApiError(
+        "Token de usuário ausente. Estas operações são AUTENTICADAS (gestão/acompanhamento) e " +
+          "precisam de um JWT de sessão em SOCIALGO_TOKEN (alias SOCIALGO_USER_TOKEN) — diferente da " +
+          "SOCIALGO_API_KEY do protocolo SMM. Pegue-o logado no painel. (Comprar é keyless: use os guest-*.)",
+      );
+    }
+    const { method = "GET", body } = opts;
+    const url = `${this.baseUrl}${path}`;
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
+    try {
+      const headers: Record<string, string> = { Authorization: `Bearer ${this.token}` };
+      if (body !== undefined) headers["Content-Type"] = "application/json";
+      const res = await fetch(url, {
+        method,
+        headers,
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+        signal: ctrl.signal,
+      });
+
+      const text = await res.text();
+      let data: unknown;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch {
+        throw new SocialGoApiError(`Resposta não-JSON da API (HTTP ${res.status})`, res.status, text);
+      }
+
+      if (!res.ok) {
+        const apiMsg =
+          (data && typeof data === "object" && "error" in data && (data as { error?: unknown }).error) ||
+          `HTTP ${res.status}`;
+        if (res.status === 401) {
+          throw new SocialGoApiError(
+            `Não autenticado: ${String(apiMsg)}. SOCIALGO_TOKEN ausente/expirado — refaça o login no painel.`,
+            res.status,
+            data,
+          );
+        }
+        if (res.status === 403) {
+          throw new SocialGoApiError(
+            `Sem permissão: ${String(apiMsg)} (ex.: a conta não é revendedor, ou a feature está desativada).`,
+            res.status,
+            data,
+          );
+        }
+        throw new SocialGoApiError(String(apiMsg), res.status, data);
+      }
+
+      return data as T;
+    } catch (err) {
+      if (err instanceof SocialGoApiError) throw err;
+      if (err instanceof Error && err.name === "AbortError") {
+        throw new SocialGoApiError(`Tempo esgotado ao chamar ${path}`);
+      }
+      throw new SocialGoApiError(`Falha ao chamar ${path}`, undefined, err);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // ── Sub-revenda (painel-filho) ─────────────────────────────────────────────
+
+  /** Resumo do painel-filho do próprio sub-revendedor. */
+  subDashboard(): Promise<SubDashboard> {
+    return this.authRequest<SubDashboard>("/sub-reseller/");
+  }
+
+  /** Define o próprio markup (clampado pelo teto). Devolve o markup efetivo. */
+  subSetMarkup(markupPercent: number): Promise<{ markupPercent: number }> {
+    return this.authRequest<{ markupPercent: number }>("/sub-reseller/markup", {
+      method: "PATCH",
+      body: { markupPercent },
+    });
+  }
+
+  /** Lista os clientes do próprio sub-revendedor (escopado). */
+  async subClients(): Promise<SubClient[]> {
+    const res = await this.authRequest<{ items: SubClient[] }>("/sub-reseller/clients");
+    return Array.isArray(res?.items) ? res.items : [];
+  }
+
+  /** Cria um cliente vinculado ao sub-revendedor. */
+  async subCreateClient(input: {
+    email: string;
+    password: string;
+    name?: string;
+  }): Promise<SubClient> {
+    const res = await this.authRequest<{ item: SubClient }>("/sub-reseller/clients", {
+      method: "POST",
+      body: input,
+    });
+    return res.item;
+  }
+
+  /** Lista os pedidos dos clientes do sub-revendedor (escopado). */
+  async subOrders(): Promise<OrderListItem[]> {
+    const res = await this.authRequest<{ items: OrderListItem[] }>("/sub-reseller/orders");
+    return Array.isArray(res?.items) ? res.items : [];
+  }
+
+  /**
+   * Recarrega a carteira de um cliente do sub (move $ revendedor → cliente).
+   *
+   * Valida o `clientId` como UUID ANTES da chamada (a coluna `users.id` é UUID
+   * no Postgres; um id malformado dispararia 22P02 → 500 cru). E, por ser uma
+   * operação FINANCEIRA sujeita a retry (timeout/abort pode ter chegado ao
+   * servidor), gera um `idempotencyKey` (uuid) por padrão quando o chamador não
+   * passa um — evitando recarga dupla. A idempotência REAL é server-side (índice
+   * único em reseller_recharges), mas a chave default garante que retries deste
+   * mesmo submit colidam nela.
+   */
+  rechargeClient(input: {
+    clientId: string;
+    amount: number;
+    idempotencyKey?: string;
+  }): Promise<unknown> {
+    const { clientId, amount } = input;
+    if (!UUID_RE.test(clientId)) {
+      throw new SocialGoApiError(
+        `clientId inválido: "${clientId}" não é um UUID. ` +
+          `Pegue o id do cliente em 'socialgo sub-reseller clients' (campo id).`,
+      );
+    }
+    const idempotencyKey = input.idempotencyKey ?? randomUUID();
+    return this.authRequest(`/sub-reseller/clients/${encodeURIComponent(clientId)}/recharge`, {
+      method: "POST",
+      body: { amount, idempotencyKey },
+    });
+  }
+
+  /** Relatório de lucro (CUSTO × RECEITA × LUCRO) do sub-revendedor. */
+  subProfit(): Promise<unknown> {
+    return this.authRequest("/sub-reseller/profit");
+  }
+
+  /** Código + URL de convite self-service (estável). */
+  subInvite(): Promise<SubInvite> {
+    return this.authRequest<SubInvite>("/sub-reseller/invite");
+  }
+
+  /** Rotaciona o código de convite (invalida o link antigo). */
+  subRotateInvite(): Promise<SubInvite> {
+    return this.authRequest<SubInvite>("/sub-reseller/invite/rotate", { method: "POST" });
+  }
+
+  // ── Pontos / gamificação ───────────────────────────────────────────────────
+
+  /** Estado consolidado de recompensas: tier + multiplicador + streak. */
+  pointsRewardsState(): Promise<unknown> {
+    return this.authRequest("/points/rewards-state");
+  }
+
+  /** Reivindica o bônus de streak do dia (idempotente 1/dia-UTC). */
+  pointsClaimStreak(): Promise<unknown> {
+    return this.authRequest("/points/streak/claim", { method: "POST" });
+  }
+
+  /** Estado das missões semanais (progresso derivado). */
+  pointsMissions(): Promise<unknown> {
+    return this.authRequest("/points/missions");
+  }
+
+  /** Reivindica os pontos de UMA missão (idempotente por user+missão+semana). */
+  pointsClaimMission(missionId: string): Promise<unknown> {
+    return this.authRequest("/points/missions/claim", { method: "POST", body: { missionId } });
+  }
+
+  /** Estado da roleta diária (habilitada?, já girou?, prêmios). */
+  pointsRoulette(): Promise<unknown> {
+    return this.authRequest("/points/roulette");
+  }
+
+  /** Gira a roleta do dia (idempotente 1/dia-UTC). */
+  pointsSpinRoulette(): Promise<unknown> {
+    return this.authRequest("/points/roulette/spin", { method: "POST" });
+  }
+
+  /** Conquistas/badges do usuário. */
+  pointsBadges(): Promise<unknown> {
+    return this.authRequest("/points/badges");
+  }
+
+  /** Ranking anonimizado (leaderboard). */
+  pointsLeaderboard(): Promise<unknown> {
+    return this.authRequest("/points/leaderboard");
+  }
+
+  /** Perks de todos os níveis + tier atual. */
+  pointsPerks(): Promise<unknown> {
+    return this.authRequest("/points/perks");
+  }
+
+  /** Progresso de indicações gamificadas. */
+  pointsReferralProgress(): Promise<unknown> {
+    return this.authRequest("/points/referral-progress");
+  }
+
+  /** Marco mais próximo + countdown de campanha. */
+  pointsMilestones(): Promise<unknown> {
+    return this.authRequest("/points/milestones");
+  }
+
+  /** Resgata pontos creditando a carteira (body { amount }). */
+  pointsRedeem(amount: number): Promise<unknown> {
+    return this.authRequest("/points/redeem", { method: "POST", body: { amount } });
+  }
+
+  // ── Onboarding revendedor ──────────────────────────────────────────────────
+
+  /** Checkout do plano de revendedor (pagamento único). Devolve { url, paymentId, amount, currency }. */
+  resellerCheckout(method: string): Promise<{
+    url: string;
+    paymentId: string | number;
+    amount: string | number;
+    currency: string;
+  }> {
+    return this.authRequest("/payments/reseller-checkout", { method: "POST", body: { method } });
+  }
+
+  // ── Afiliados (saque) ──────────────────────────────────────────────────────
+
+  /**
+   * Solicita um SAQUE do saldo de afiliado (`POST /affiliates/request-payout`,
+   * requireUser). É AUTENTICADA (usa SOCIALGO_TOKEN) — a leitura de saldo/mínimo
+   * vem do `affiliate_stats` (modo revendedor), mas SACAR mora aqui. O servidor
+   * valida saldo ≥ valor e ≥ saque mínimo; devolve o saque criado (status
+   * 'pending'). Operação financeira: a CLI confirma antes (a menos de --yes).
+   */
+  async affiliateRequestPayout(input: {
+    amount: number;
+    method?: string;
+    note?: string;
+  }): Promise<AffiliatePayoutRequest> {
+    const res = await this.authRequest<{ payout: AffiliatePayoutRequest }>(
+      "/affiliates/request-payout",
+      { method: "POST", body: { amount: input.amount, method: input.method, note: input.note } },
+    );
+    return res.payout ?? (res as unknown as AffiliatePayoutRequest);
   }
 }
 

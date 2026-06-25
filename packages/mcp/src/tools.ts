@@ -76,6 +76,7 @@
  * Nenhum fornecedor upstream é citado: o MCP enxerga apenas o painel SocialGO.
  */
 
+import { randomUUID } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { SmmService } from "@socialgo/sdk";
@@ -109,6 +110,33 @@ function apiKey(): string {
     );
   }
   return key;
+}
+
+/**
+ * Token de SESSÃO do usuário (JWT Bearer), distinto da `SOCIALGO_API_KEY`.
+ *
+ * As features de GESTÃO/ACOMPANHAMENTO mais novas (painel de sub-revenda,
+ * gamificação/pontos, compra do plano de revendedor) vivem em rotas REST do
+ * painel protegidas por `requireUser` (login de usuário), NÃO no protocolo
+ * SMM v2 (`key` + `action`) nem no funil guest. Por isso elas exigem um JWT de
+ * usuário logado — obtido em **Conta › API/Sessão** no painel — exposto como
+ * `SOCIALGO_TOKEN` (alias: `SOCIALGO_USER_TOKEN`). NUNCA é embutido no código.
+ *
+ * É OPCIONAL: só as tools AUTENTICADAS (sub-revenda/pontos/onboarding) a exigem.
+ * Comprar continua keyless via socialgo_guest_* — este token não muda isso.
+ */
+function userToken(): string {
+  const token = process.env.SOCIALGO_TOKEN || process.env.SOCIALGO_USER_TOKEN;
+  if (!token) {
+    throw new Error(
+      "Esta tool é AUTENTICADA (para GESTÃO/ACOMPANHAMENTO: painel de sub-revenda, pontos/" +
+        "gamificação, plano de revendedor) e precisa de um TOKEN de usuário logado em " +
+        "SOCIALGO_TOKEN (alias SOCIALGO_USER_TOKEN) — um JWT de sessão, diferente da " +
+        "SOCIALGO_API_KEY do protocolo SMM. Pegue-o logado no painel (Conta › Sessão/API). " +
+        "Para COMPRAR isso NÃO é necessário: use socialgo_guest_* (keyless).",
+    );
+  }
+  return token;
 }
 
 // ── Cliente SMM v2 contra o próprio painel ────────────────────────────────────
@@ -221,6 +249,80 @@ async function guest<T = unknown>(
         ? String((data as { error: unknown }).error)
         : `HTTP ${res.status}`;
     throw new Error(`Erro da API SocialGO: ${msg}`);
+  }
+  return data as T;
+}
+
+// ── Cliente REST AUTENTICADO (JWT Bearer do usuário logado) ───────────────────
+
+/**
+ * Chamada às rotas REST do painel protegidas por LOGIN de usuário (requireUser):
+ * `/sub-reseller/*`, `/points/*`, `/payments/reseller-checkout`.
+ *
+ * Diferente de `smm()` (protocolo SMM v2 com `key`+`action`) e de `guest()`
+ * (REST público sem credencial), aqui mandamos `Authorization: Bearer <JWT>` do
+ * usuário (SOCIALGO_TOKEN). São features AUTENTICADAS de GESTÃO/ACOMPANHAMENTO —
+ * sem token, lança orientando ao login (sem nunca pedir/expor segredo no código).
+ *
+ * 401/403 viram mensagens legíveis (token ausente/expirado, ou usuário sem
+ * permissão — ex.: não é sub-revendedor). Nenhuma PII de terceiros é exposta.
+ */
+async function auth<T = unknown>(
+  method: "GET" | "POST" | "PATCH",
+  path: string,
+  body?: Record<string, unknown>,
+): Promise<T> {
+  const token = userToken();
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 30_000);
+  let res: Response;
+  try {
+    res = await fetch(`${apiBase()}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${token}`,
+        ...(body ? { "Content-Type": "application/json" } : {}),
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: ctrl.signal,
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Tempo esgotado ao chamar a API SocialGO (${method} ${path}).`);
+    }
+    throw new Error(
+      `Não foi possível conectar à API SocialGO em ${apiBase()} ` +
+        `(${method} ${path}): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  clearTimeout(timer);
+
+  const text = await res.text();
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    throw new Error(`Resposta não-JSON da API (HTTP ${res.status}): ${text.slice(0, 200)}`);
+  }
+  if (!res.ok) {
+    const apiMsg =
+      data && typeof data === "object" && "error" in data
+        ? String((data as { error: unknown }).error)
+        : `HTTP ${res.status}`;
+    if (res.status === 401) {
+      throw new Error(
+        `Não autenticado (${apiMsg}). O SOCIALGO_TOKEN está ausente, inválido ou expirado — ` +
+          `faça login no painel e atualize o token. Esta é uma tool AUTENTICADA (gestão).`,
+      );
+    }
+    if (res.status === 403) {
+      throw new Error(
+        `Sem permissão (${apiMsg}). Sua conta pode não ter acesso a este recurso ` +
+          `(ex.: não é sub-revendedor, ou a feature está desativada no painel).`,
+      );
+    }
+    throw new Error(`Erro da API SocialGO: ${apiMsg}`);
   }
   return data as T;
 }
@@ -353,6 +455,49 @@ function ok(data: unknown): ToolResult {
 function fail(err: unknown): ToolResult {
   const message = err instanceof Error ? err.message : String(err);
   return { content: [{ type: "text", text: `Erro: ${message}` }], isError: true };
+}
+
+/**
+ * Schema reutilizável de confirmação para tools que MOVEM DINHEIRO/credenciais
+ * (recarga de carteira, criar cliente com senha, comprar plano de revendedor,
+ * sacar afiliado). Num MCP dirigido por LLM, um prompt ambíguo poderia disparar
+ * a operação real sem checagem; exigir `confirm: true` força uma etapa explícita
+ * (e `dryRun` permite o LLM simular/explicar antes de executar de verdade).
+ */
+const confirmField = {
+  confirm: z
+    .boolean()
+    .optional()
+    .describe(
+      "OBRIGATÓRIO (true) para EXECUTAR esta operação financeira/sensível. Sem confirm:true a tool NÃO " +
+        "executa — devolve uma prévia do que faria. Confirme com o usuário ANTES de passar true.",
+    ),
+  dryRun: z
+    .boolean()
+    .optional()
+    .describe("Se true, só devolve a prévia (não executa), mesmo com confirm:true. Útil para revisar antes."),
+};
+
+/**
+ * Guard de confirmação: devolve um ToolResult de PRÉVIA (sem executar) quando o
+ * usuário não confirmou (`confirm !== true`) ou pediu `dryRun`. Retorna null
+ * quando está liberado para executar. `preview` descreve o efeito da operação.
+ */
+function requireConfirm(
+  args: { confirm?: boolean; dryRun?: boolean },
+  preview: Record<string, unknown>,
+): ToolResult | null {
+  if (args.dryRun || args.confirm !== true) {
+    return ok({
+      status: "confirmation_required",
+      willExecute: false,
+      message:
+        "Operação NÃO executada — é uma ação financeira/sensível. Revise a prévia e chame de novo com " +
+        "confirm:true para executar de verdade.",
+      preview,
+    });
+  }
+  return null;
 }
 
 /** Normaliza uma lista de ids (number|string) para CSV limpo, sem vazios. */
@@ -907,6 +1052,58 @@ export async function registerTools(server: McpServer): Promise<void> {
     },
   );
 
+  /* ──────────────────── 11b) socialgo_guest_recommend ───────────────────────── */
+  // Cross-sell PÚBLICO (keyless) — par guest-first do socialgo_recommend (que é
+  // modo revendedor). Bate em GET /guest/services/:id/recommendations (quando há
+  // serviceId) ou GET /guest/recommendations. Não exige conta nem chave.
+  server.tool(
+    "socialgo_guest_recommend",
+    "PÚBLICO (keyless) — NÃO precisa de conta nem API key. Sugere próximos serviços (cross-sell) a partir " +
+      "de um serviço-âncora (`serviceId`, o `id` de socialgo_guest_services) e/ou de uma `platform`. É o par " +
+      "guest-first de socialgo_recommend (que exige SOCIALGO_API_KEY): use ESTA para sugerir próximos passos " +
+      "a quem comprou via socialgo_guest_order. Sem âncora, devolve populares. Retorna uma lista de " +
+      "{ id, name, platform, categoryName, sellRate, min, max, refill, reason } onde `reason` é " +
+      "'bought_together' | 'same_platform' | 'popular'. O `id` retornado serve direto como `serviceId` em " +
+      "socialgo_guest_order.",
+    {
+      serviceId: z
+        .string()
+        .uuid()
+        .optional()
+        .describe("UUID do serviço-âncora (o `id` de socialgo_guest_services). Recomenda a partir dele."),
+      platform: z
+        .string()
+        .optional()
+        .describe("Plataforma a recomendar, ex.: 'Instagram', 'TikTok', 'YouTube' (usada sem serviceId)."),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(24)
+        .optional()
+        .describe("Máximo de recomendações a retornar (1-24)."),
+    },
+    async ({ serviceId, platform, limit }) => {
+      try {
+        const qs = new URLSearchParams();
+        if (limit !== undefined) qs.set("limit", String(limit));
+        let path: string;
+        if (serviceId) {
+          // Atalho por id: serviceId vai no path; só limit é query.
+          path = `/guest/services/${encodeURIComponent(serviceId)}/recommendations`;
+        } else {
+          // Genérico: platform/limit como query (serviceId já é undefined aqui).
+          if (platform) qs.set("platform", platform);
+          path = "/guest/recommendations";
+        }
+        const suffix = qs.toString() ? `?${qs.toString()}` : "";
+        return ok(await guest("GET", `${path}${suffix}`));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
   /* ───────────────────────── 12) socialgo_wallet ──────────────────────────── */
   // Saldo + extrato recente da carteira do PRÓPRIO usuário (action=wallet).
   server.tool(
@@ -1115,7 +1312,7 @@ export async function registerTools(server: McpServer): Promise<void> {
   // Recomendações por serviço-âncora e/ou plataforma (action=recommend).
   server.tool(
     "socialgo_recommend",
-    "MODO REVENDEDOR (requer SOCIALGO_API_KEY). Sem conta / sem chave? Use socialgo_guest_services para navegar o catálogo. " +
+    "MODO REVENDEDOR (requer SOCIALGO_API_KEY). Sem conta / sem chave? Use socialgo_guest_recommend (cross-sell keyless, mesmo resultado) — ou socialgo_guest_services para navegar o catálogo. " +
       "Recomenda serviços relacionados a partir de um `service` âncora e/ou uma `platform`. " +
       "Retorna uma lista ranqueada de { service, name, category, platform, rate, min, max, refill, reason } onde " +
       "`reason` é 'bought_together' | 'same_platform' | 'popular'. " +
@@ -1209,6 +1406,504 @@ export async function registerTools(server: McpServer): Promise<void> {
     async ({ slug }) => {
       try {
         return ok(await smm("storefront", { slug }));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ══════════════════════════════════════════════════════════════════════════
+   *  AUTENTICADAS — para GESTÃO/ACOMPANHAMENTO (precisam de SOCIALGO_TOKEN, o
+   *  JWT de usuário logado — NÃO da SOCIALGO_API_KEY do protocolo SMM, NEM do
+   *  funil guest). Cobrem features REST do painel sob `requireUser`:
+   *    • Sub-revenda (painel-filho): gerir clientes, markup, saldo, lucro, convite.
+   *    • Gamificação (pontos): recompensas, streak, missões, roleta, badges,
+   *      leaderboard, resgate de pontos.
+   *    • Onboarding revendedor (compra do plano de revenda).
+   *  Comprar continua keyless via socialgo_guest_* — estas NÃO mudam o guest-first.
+   * ══════════════════════════════════════════════════════════════════════════ */
+
+  /* ───────────────── 23) socialgo_subreseller_dashboard ────────────────────── */
+  server.tool(
+    "socialgo_subreseller_dashboard",
+    "AUTENTICADA — para GESTÃO (precisa de SOCIALGO_TOKEN; é um JWT de usuário logado, NÃO a API key SMM). " +
+      "Só para REVENDEDOR/sub-revendedor (usuário comum recebe 403). " +
+      "Resumo do painel-filho do PRÓPRIO sub-revendedor: saldo, markup atual, teto de markup e " +
+      "nº de clientes/pedidos. Use para dar um panorama da operação de revenda. Escopado ao usuário do token (GET /sub-reseller/).",
+    {},
+    async () => {
+      try {
+        return ok(await auth("GET", "/sub-reseller/"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 24) socialgo_subreseller_set_markup ───────────────────── */
+  server.tool(
+    "socialgo_subreseller_set_markup",
+    "AUTENTICADA — para GESTÃO (precisa de SOCIALGO_TOKEN). Só REVENDEDOR/sub-revendedor. " +
+      "Define o PRÓPRIO markup (percentual de margem sobre o custo) do sub-revendedor. O valor é " +
+      "clampado pelo teto definido pelo dono do painel — a resposta devolve o markup efetivo aplicado. " +
+      "PATCH /sub-reseller/markup.",
+    {
+      markupPercent: z
+        .number()
+        .min(0)
+        .max(100000)
+        .describe("Percentual de markup a aplicar (0-100000). Será clampado pelo teto do painel."),
+    },
+    async ({ markupPercent }) => {
+      try {
+        return ok(await auth("PATCH", "/sub-reseller/markup", { markupPercent }));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 25) socialgo_subreseller_clients ──────────────────────── */
+  server.tool(
+    "socialgo_subreseller_clients",
+    "AUTENTICADA — para ACOMPANHAMENTO (precisa de SOCIALGO_TOKEN). Só REVENDEDOR/sub-revendedor. " +
+      "Lista os clientes vinculados ao PRÓPRIO sub-revendedor (escopado — nunca vê clientes de outro). " +
+      "GET /sub-reseller/clients.",
+    {},
+    async () => {
+      try {
+        return ok(await auth("GET", "/sub-reseller/clients"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 26) socialgo_subreseller_create_client ────────────────── */
+  server.tool(
+    "socialgo_subreseller_create_client",
+    "AUTENTICADA — para GESTÃO (precisa de SOCIALGO_TOKEN). Só REVENDEDOR/sub-revendedor. " +
+      "Cria um cliente vinculado ao sub-revendedor (nasce escopado a ele). Devolve { item } com o " +
+      "cliente criado, ou erro 409 se o e-mail já estiver cadastrado. A senha define o acesso inicial do " +
+      "cliente. CRIA CREDENCIAIS — exige confirm:true para executar. POST /sub-reseller/clients.",
+    {
+      email: z.string().email().max(320).describe("E-mail (login) do novo cliente."),
+      password: z
+        .string()
+        .min(8)
+        .max(200)
+        .describe("Senha inicial do cliente (mín. 8 caracteres)."),
+      name: z.string().trim().min(1).max(200).optional().describe("Nome do cliente (opcional)."),
+      ...confirmField,
+    },
+    async ({ email, password, name, confirm, dryRun }) => {
+      try {
+        const gate = requireConfirm(
+          { confirm, dryRun },
+          { action: "create_client", email, name: name ?? null, password: "(definida — oculta)" },
+        );
+        if (gate) return gate;
+        return ok(await auth("POST", "/sub-reseller/clients", { email, password, name }));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 27) socialgo_subreseller_orders ───────────────────────── */
+  server.tool(
+    "socialgo_subreseller_orders",
+    "AUTENTICADA — para ACOMPANHAMENTO (precisa de SOCIALGO_TOKEN). Só REVENDEDOR/sub-revendedor. " +
+      "Lista os pedidos dos clientes do PRÓPRIO sub-revendedor (escopado). Use para acompanhar a " +
+      "operação dos clientes vinculados. GET /sub-reseller/orders.",
+    {},
+    async () => {
+      try {
+        return ok(await auth("GET", "/sub-reseller/orders"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────── 28) socialgo_subreseller_recharge_client ──────────────────── */
+  server.tool(
+    "socialgo_subreseller_recharge_client",
+    "AUTENTICADA — para GESTÃO (precisa de SOCIALGO_TOKEN). Só REVENDEDOR/sub-revendedor. " +
+      "Recarrega a carteira de UM cliente do sub-revendedor: move saldo do revendedor → cliente numa " +
+      "transação atômica (o custo sai do saldo do revendedor). Só funciona para clientes vinculados a ele " +
+      "(senão 403). Passe `clientId` (UUID do cliente, obtido em socialgo_subreseller_clients) e `amount`. " +
+      "Um `idempotencyKey` é GERADO por padrão (uuid) se você não passar — torna o submit seguro contra " +
+      "duplicação em retries. 429 se já houver recarga em andamento para o mesmo par. MOVE DINHEIRO — exige " +
+      "confirm:true para executar. POST /sub-reseller/clients/:id/recharge.",
+    {
+      clientId: z
+        .string()
+        .uuid()
+        .describe("UUID do cliente a recarregar (de socialgo_subreseller_clients — campo id)."),
+      amount: z
+        .number()
+        .positive()
+        .max(1_000_000)
+        .describe("Valor a creditar na carteira do cliente (sai do saldo do revendedor)."),
+      idempotencyKey: z
+        .string()
+        .trim()
+        .min(1)
+        .max(200)
+        .optional()
+        .describe("Chave idempotente. Se omitida, é gerada automaticamente (uuid) para evitar recarga dupla."),
+      ...confirmField,
+    },
+    async ({ clientId, amount, idempotencyKey, confirm, dryRun }) => {
+      try {
+        // Operação financeira sujeita a retry → chave idempotente default (uuid)
+        // quando ausente, evitando recarga dupla se o submit for repetido.
+        const key = idempotencyKey ?? randomUUID();
+        const gate = requireConfirm(
+          { confirm, dryRun },
+          { action: "recharge_client", clientId, amount, idempotencyKey: key },
+        );
+        if (gate) return gate;
+        return ok(
+          await auth("POST", `/sub-reseller/clients/${encodeURIComponent(clientId)}/recharge`, {
+            amount,
+            idempotencyKey: key,
+          }),
+        );
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 29) socialgo_subreseller_profit ───────────────────────── */
+  server.tool(
+    "socialgo_subreseller_profit",
+    "AUTENTICADA — para ACOMPANHAMENTO (precisa de SOCIALGO_TOKEN). Só REVENDEDOR/sub-revendedor. " +
+      "Relatório de lucro do sub-revendedor (CUSTO × RECEITA × LUCRO), escopado aos clientes dele. " +
+      "Use para mostrar a margem da operação de revenda. GET /sub-reseller/profit.",
+    {},
+    async () => {
+      try {
+        return ok(await auth("GET", "/sub-reseller/profit"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 30) socialgo_subreseller_invite ───────────────────────── */
+  server.tool(
+    "socialgo_subreseller_invite",
+    "AUTENTICADA — para GESTÃO (precisa de SOCIALGO_TOKEN). Só REVENDEDOR/sub-revendedor. " +
+      "Obtém/garante o código de convite ESTÁVEL do revendedor + a URL pública de cadastro self-service " +
+      "(APP_URL/r/<code>). Clientes que entram por esse link nascem vinculados a este revendedor. " +
+      "Use `rotate: true` para gerar um NOVO código e INVALIDAR o link antigo. " +
+      "GET /sub-reseller/invite (ou POST /sub-reseller/invite/rotate quando rotate=true).",
+    {
+      rotate: z
+        .boolean()
+        .optional()
+        .describe("Se true, rotaciona o código (invalida o link anterior). Default: false (só obtém o atual)."),
+    },
+    async ({ rotate }) => {
+      try {
+        return ok(
+          rotate
+            ? await auth("POST", "/sub-reseller/invite/rotate")
+            : await auth("GET", "/sub-reseller/invite"),
+        );
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 31) socialgo_points_rewards_state ─────────────────────── */
+  server.tool(
+    "socialgo_points_rewards_state",
+    "AUTENTICADA — para ACOMPANHAMENTO (precisa de SOCIALGO_TOKEN; JWT de usuário logado). " +
+      "Estado consolidado de recompensas/gamificação do PRÓPRIO usuário: tier, multiplicador de pontos " +
+      "(tier + campanha + efetivo, se há campanha ativa) e status do streak diário (dias, se já reivindicou " +
+      "hoje, pontos do próximo claim). Vai ALÉM de socialgo_loyalty_status (que é só tier/pontos estáticos). " +
+      "Só exibição — nada é concedido aqui. GET /points/rewards-state.",
+    {},
+    async () => {
+      try {
+        return ok(await auth("GET", "/points/rewards-state"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 32) socialgo_points_claim_streak ──────────────────────── */
+  server.tool(
+    "socialgo_points_claim_streak",
+    "AUTENTICADA — para GESTÃO (precisa de SOCIALGO_TOKEN). " +
+      "Reivindica o bônus de STREAK do dia para o usuário logado. Idempotente: 1 claim por dia-UTC — o " +
+      "2º claim no mesmo dia volta alreadyClaimed=true sem conceder de novo. " +
+      "Cheque antes com socialgo_points_rewards_state (claimedToday). POST /points/streak/claim.",
+    {},
+    async () => {
+      try {
+        return ok(await auth("POST", "/points/streak/claim"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 33) socialgo_points_missions ──────────────────────────── */
+  server.tool(
+    "socialgo_points_missions",
+    "AUTENTICADA — para ACOMPANHAMENTO (precisa de SOCIALGO_TOKEN). " +
+      "Estado das MISSÕES SEMANAIS do usuário logado: progresso derivado de pedidos/depósitos da semana " +
+      "corrente + o que já foi reivindicado. Use para listar missões e ver quais já podem ser reivindicadas " +
+      "(depois use socialgo_points_claim_mission). GET /points/missions.",
+    {},
+    async () => {
+      try {
+        return ok(await auth("GET", "/points/missions"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ─────────────── 34) socialgo_points_claim_mission ───────────────────────── */
+  server.tool(
+    "socialgo_points_claim_mission",
+    "AUTENTICADA — para GESTÃO (precisa de SOCIALGO_TOKEN). " +
+      "Reivindica os pontos de UMA missão completada do usuário logado. Idempotente por usuário+missão+" +
+      "semana-ISO; o servidor re-mede o progresso antes de conceder. Passe o `missionId` (de " +
+      "socialgo_points_missions). POST /points/missions/claim (body { missionId }).",
+    {
+      missionId: z
+        .string()
+        .min(1)
+        .max(40)
+        .describe("Id da missão a reivindicar (obtido em socialgo_points_missions)."),
+    },
+    async ({ missionId }) => {
+      try {
+        return ok(await auth("POST", "/points/missions/claim", { missionId }));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 35) socialgo_points_roulette ──────────────────────────── */
+  server.tool(
+    "socialgo_points_roulette",
+    "AUTENTICADA — para ACOMPANHAMENTO (precisa de SOCIALGO_TOKEN). " +
+      "Estado da ROLETA DIÁRIA do usuário logado: se está habilitada, se já girou hoje e os prêmios " +
+      "possíveis. Cheque antes de socialgo_points_spin_roulette. GET /points/roulette.",
+    {},
+    async () => {
+      try {
+        return ok(await auth("GET", "/points/roulette"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 36) socialgo_points_spin_roulette ─────────────────────── */
+  server.tool(
+    "socialgo_points_spin_roulette",
+    "AUTENTICADA — para GESTÃO (precisa de SOCIALGO_TOKEN). " +
+      "Gira a ROLETA do dia do usuário logado (sorteio no servidor). Idempotente: 1 giro por dia-UTC. " +
+      "Cheque antes com socialgo_points_roulette (se já girou). POST /points/roulette/spin.",
+    {},
+    async () => {
+      try {
+        return ok(await auth("POST", "/points/roulette/spin"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 37) socialgo_points_badges ────────────────────────────── */
+  server.tool(
+    "socialgo_points_badges",
+    "AUTENTICADA — para ACOMPANHAMENTO (precisa de SOCIALGO_TOKEN). " +
+      "Conquistas/badges do usuário logado (derivadas de pedidos, gasto, tier, indicações, resgate e " +
+      "streak). Só leitura. GET /points/badges.",
+    {},
+    async () => {
+      try {
+        return ok(await auth("GET", "/points/badges"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 38) socialgo_points_leaderboard ───────────────────────── */
+  server.tool(
+    "socialgo_points_leaderboard",
+    "AUTENTICADA — para ACOMPANHAMENTO (precisa de SOCIALGO_TOKEN). " +
+      "Ranking ANONIMIZADO (leaderboard) com a posição do usuário logado. Nunca vaza dado pessoal de " +
+      "terceiros (só apelido mascarado + posição + valor da métrica). GET /points/leaderboard.",
+    {},
+    async () => {
+      try {
+        return ok(await auth("GET", "/points/leaderboard"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 39) socialgo_points_perks ─────────────────────────────── */
+  server.tool(
+    "socialgo_points_perks",
+    "AUTENTICADA — para ACOMPANHAMENTO (precisa de SOCIALGO_TOKEN). " +
+      "Perks (benefícios) de TODOS os níveis + o tier atual do usuário logado. Só leitura. " +
+      "GET /points/perks.",
+    {},
+    async () => {
+      try {
+        return ok(await auth("GET", "/points/perks"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ─────────────── 40) socialgo_points_referral_progress ───────────────────── */
+  server.tool(
+    "socialgo_points_referral_progress",
+    "AUTENTICADA — para ACOMPANHAMENTO (precisa de SOCIALGO_TOKEN). " +
+      "Progresso de INDICAÇÕES gamificadas do usuário logado: quantos indicou, quantos converteram e " +
+      "pontos já ganhos como indicador. Só leitura. GET /points/referral-progress.",
+    {},
+    async () => {
+      try {
+        return ok(await auth("GET", "/points/referral-progress"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 41) socialgo_points_milestones ────────────────────────── */
+  server.tool(
+    "socialgo_points_milestones",
+    "AUTENTICADA — para ACOMPANHAMENTO (precisa de SOCIALGO_TOKEN). " +
+      "Marco mais próximo (resgate / tier / badge) + countdown da campanha ativa para o usuário logado. " +
+      "Tudo derivado; nada concedido. GET /points/milestones.",
+    {},
+    async () => {
+      try {
+        return ok(await auth("GET", "/points/milestones"));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 42) socialgo_points_redeem ────────────────────────────── */
+  server.tool(
+    "socialgo_points_redeem",
+    "AUTENTICADA — para GESTÃO (precisa de SOCIALGO_TOKEN). " +
+      "Resgata pontos do usuário logado, creditando o valor correspondente na carteira da conta. " +
+      "Passe `amount` (valor de pontos a resgatar). Confirme o saldo de pontos antes com " +
+      "socialgo_points_rewards_state ou socialgo_loyalty_status. POST /points/redeem.",
+    {
+      amount: z
+        .number()
+        .positive()
+        .finite()
+        .describe("Valor de pontos a resgatar (creditado como saldo na carteira)."),
+    },
+    async ({ amount }) => {
+      try {
+        return ok(await auth("POST", "/points/redeem", { amount }));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 43) socialgo_reseller_checkout ────────────────────────── */
+  server.tool(
+    "socialgo_reseller_checkout",
+    "AUTENTICADA — ONBOARDING (precisa de SOCIALGO_TOKEN; JWT de usuário logado). " +
+      "Cria o checkout de COMPRA DO PLANO DE REVENDEDOR (pagamento único) para o usuário logado: promove a " +
+      "conta a revendedor após o pagamento confirmar. O preço é FORÇADO no servidor (nunca vem do client). " +
+      "Devolve { url, paymentId, amount, currency } — entregue a `url` para o usuário pagar. 400 se a conta " +
+      "já é revendedor/admin ou se o onboarding self-service estiver desativado. Use socialgo_guest_gateways " +
+      "para descobrir um `method` ativo. COMPRA (gera cobrança) — exige confirm:true para executar. " +
+      "POST /payments/reseller-checkout.",
+    {
+      method: z
+        .string()
+        .min(1)
+        .describe(
+          "Gateway de pagamento ATIVO (campo `gateway` de socialgo_guest_gateways / GET /gateways/active). " +
+            "Lista dinâmica — não é fixa.",
+        ),
+      ...confirmField,
+    },
+    async ({ method, confirm, dryRun }) => {
+      try {
+        const gate = requireConfirm(
+          { confirm, dryRun },
+          { action: "reseller_checkout", method, note: "cria cobrança do plano de revendedor (preço forçado no servidor)" },
+        );
+        if (gate) return gate;
+        return ok(await auth("POST", "/payments/reseller-checkout", { method }));
+      } catch (err) {
+        return fail(err);
+      }
+    },
+  );
+
+  /* ───────────────── 44) socialgo_affiliate_request_payout ─────────────────── */
+  // SAQUE do saldo de afiliado (autenticado, requireUser). Complementa a LEITURA
+  // de socialgo_affiliate_stats: ali o usuário VÊ o saldo; aqui ele SACA.
+  server.tool(
+    "socialgo_affiliate_request_payout",
+    "AUTENTICADA — para GESTÃO (precisa de SOCIALGO_TOKEN; JWT de usuário logado). " +
+      "Solicita um SAQUE do saldo de afiliado do usuário logado. socialgo_affiliate_stats é só LEITURA " +
+      "(saldo, saque mínimo, níveis); ESTA tool é quem efetivamente SACA. O servidor valida saldo ≥ valor e " +
+      "≥ saque mínimo (veja `minimum_payout` em socialgo_affiliate_stats antes). Devolve o saque criado " +
+      "({ id, amount, status:'pending' }). MOVE DINHEIRO — exige confirm:true para executar. " +
+      "POST /affiliates/request-payout.",
+    {
+      amount: z
+        .number()
+        .positive()
+        .max(1_000_000)
+        .describe("Valor a sacar do saldo de afiliado (>= saque mínimo de socialgo_affiliate_stats)."),
+      method: z
+        .string()
+        .trim()
+        .min(1)
+        .max(40)
+        .optional()
+        .describe("Método de saque preferido (opcional), ex.: 'pix', 'usdt'."),
+      note: z
+        .string()
+        .trim()
+        .max(2000)
+        .optional()
+        .describe("Observação opcional para o saque (ex.: chave PIX/endereço)."),
+      ...confirmField,
+    },
+    async ({ amount, method, note, confirm, dryRun }) => {
+      try {
+        const gate = requireConfirm(
+          { confirm, dryRun },
+          { action: "affiliate_request_payout", amount, method: method ?? null },
+        );
+        if (gate) return gate;
+        return ok(await auth("POST", "/affiliates/request-payout", { amount, method, note }));
       } catch (err) {
         return fail(err);
       }

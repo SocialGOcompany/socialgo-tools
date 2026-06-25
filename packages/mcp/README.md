@@ -124,6 +124,7 @@ Configured entirely through environment variables — no secrets in code:
 | ------------------ | ----------- | ---------------------------------------------------------------------------- |
 | `SOCIALGO_API_URL` | Optional    | Base URL of your panel (e.g. `https://api.usesocialgo.com`). SMM v2 lives at `${SOCIALGO_API_URL}/api/v2`. Defaults to `https://api.usesocialgo.com`. |
 | `SOCIALGO_API_KEY` | **Optional** | Your API key, from **Dashboard › API Key**. Needed **only** for reseller tools (balance, place_order, wallet, …). The guest tools (`socialgo_guest_*`) are fully keyless — the server runs without any key. |
+| `SOCIALGO_TOKEN` (alias `SOCIALGO_USER_TOKEN`) | **Optional** | Your **logged-in user session token (JWT)**, distinct from the SMM API key. Needed **only** for the **authenticated management tools** (sub-reseller panel, points/gamification, reseller plan checkout), which run on the panel's `requireUser` REST routes. Buying stays keyless via the guest tools — this token doesn't change that. |
 
 **Two purchasing modes — how the AI should choose:**
 
@@ -172,6 +173,38 @@ of tools constant no matter how big the catalog is.
 `socialgo_affiliate_stats`, `socialgo_loyalty_status`, `socialgo_recommend`,
 `socialgo_build_campaign`, `socialgo_storefront` — all require a key.)
 
+### Authenticated — for management/tracking (needs a user token)
+
+These tools cover the panel's newer **logged-in user** features (sub-reseller panel,
+gamification/points, reseller onboarding). They run on REST routes guarded by
+`requireUser`, so they need a **user session token** in `SOCIALGO_TOKEN` (a JWT) —
+**not** the SMM `SOCIALGO_API_KEY`, and not the keyless guest funnel. Buying stays
+guest-first; these are strictly for managing/tracking an existing account.
+
+| Tool | Area | Token? | Purpose |
+| ---- | ---- | ------ | ------- |
+| `socialgo_subreseller_dashboard` | Sub-reseller | Yes | Child-panel summary (balance, markup, cap, client/order counts). |
+| `socialgo_subreseller_clients` | Sub-reseller | Yes | List your linked clients (scoped to you). |
+| `socialgo_subreseller_create_client` | Sub-reseller | Yes | Create a client linked to you. |
+| `socialgo_subreseller_set_markup` | Sub-reseller | Yes | Set your own markup % (clamped by the panel cap). |
+| `socialgo_subreseller_recharge_client` | Sub-reseller | Yes | Recharge a client's wallet (atomic reseller → client). |
+| `socialgo_subreseller_orders` | Sub-reseller | Yes | Orders of your clients (scoped). |
+| `socialgo_subreseller_profit` | Sub-reseller | Yes | Profit report (cost × revenue × profit). |
+| `socialgo_subreseller_invite` | Sub-reseller | Yes | Get/rotate your self-service signup link. |
+| `socialgo_points_rewards_state` | Points | Yes | Consolidated tier + point multiplier + daily streak state. |
+| `socialgo_points_claim_streak` | Points | Yes | Claim today's streak bonus (1/day-UTC). |
+| `socialgo_points_missions` | Points | Yes | Weekly missions state (derived progress). |
+| `socialgo_points_claim_mission` | Points | Yes | Claim one mission's points. |
+| `socialgo_points_roulette` | Points | Yes | Daily roulette state (enabled? already spun? prizes). |
+| `socialgo_points_spin_roulette` | Points | Yes | Spin the daily roulette (1/day-UTC). |
+| `socialgo_points_badges` | Points | Yes | Your achievements/badges. |
+| `socialgo_points_leaderboard` | Points | Yes | Anonymized ranking with your position. |
+| `socialgo_points_perks` | Points | Yes | Perks for all tiers + your current tier. |
+| `socialgo_points_referral_progress` | Points | Yes | Gamified referral progress. |
+| `socialgo_points_milestones` | Points | Yes | Nearest milestone + active-campaign countdown. |
+| `socialgo_points_redeem` | Points | Yes | Redeem points into wallet credit. |
+| `socialgo_reseller_checkout` | Onboarding | Yes | Create the reseller-plan checkout (one-time payment). |
+
 Full input schemas, per-tool call/response examples, an end-to-end flow, and
 client configs for every editor are in
 [`docs/mcp.md`](https://github.com/SocialGOcompany/socialgo-tools/blob/main/docs/mcp.md).
@@ -214,8 +247,10 @@ client configs for every editor are in
 ## How it works
 
 - Speaks the SMM API v2 protocol (`POST ${SOCIALGO_API_URL}/api/v2` with
-  `key` + `action`) for reseller tools, and the public REST `/guest/*` endpoints
-  for guest tools.
+  `key` + `action`) for reseller tools, the public REST `/guest/*` endpoints
+  for guest tools, and the `requireUser` REST routes (`/sub-reseller/*`,
+  `/points/*`, `/payments/reseller-checkout`) with an `Authorization: Bearer`
+  user token for the authenticated management tools.
 - Runs over stdio, launched on demand by the AI client. Logs go to stderr
   (stdout is reserved for the MCP protocol).
 - Network calls time out after 30 seconds with a clear, model-readable message.

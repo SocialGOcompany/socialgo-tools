@@ -62,8 +62,11 @@ Configure via environment variables (or the global `--api-url` / `--key` flags):
 | ------------------ | -------- | -------------------------- | ------------------------------------------------------------ |
 | `SOCIALGO_API_URL` | No       | `https://api.usesocialgo.com` | Base URL of your panel/API.                                  |
 | `SOCIALGO_API_KEY` | Optional\* | —                        | Your API key, from your panel under **/dashboard/api-key**.  |
+| `SOCIALGO_TOKEN` (alias `SOCIALGO_USER_TOKEN`) | Optional\*\* | —    | Your logged-in **user session token (JWT)** — distinct from the API key. Only for the **management** commands (`sub-reseller`, `points`, `reseller-checkout`). |
 
 \* **Not needed to buy.** The **guest** commands work with no key and no account. The key is only required for the reseller commands (order history, wallet, refills) — i.e. optional, for better tracking.
+
+\*\* Only for the authenticated **management/tracking** commands (sub-reseller panel, points/gamification, reseller-plan checkout), which use the panel's logged-in user routes. Buying stays keyless via the guest commands.
 
 ```bash
 # No key needed — buy as a guest right away:
@@ -76,7 +79,7 @@ export SOCIALGO_API_URL="https://your-panel.com"   # optional
 socialgo config   # verify your setup
 ```
 
-Global flags: `--json` (raw JSON output), `--api-url <url>`, `--key <key>`.
+Global flags: `--json` (raw JSON output), `--api-url <url>`, `--key <key>`, `--token <jwt>` (user session token, for the management commands).
 
 ---
 
@@ -102,6 +105,34 @@ Global flags: `--json` (raw JSON output), `--api-url <url>`, `--key <key>`.
 | `guest-services`             | **none** | Public catalog — find a `serviceId` for a guest order.         |
 | `guest-order <serviceId>`    | **none** | Place a no-account order and get a payment URL.                |
 | `guest-status <id>`          | **none** | Status of a guest order (`--token` or `--email`).              |
+
+### Management / tracking (authenticated — needs `SOCIALGO_TOKEN`)
+
+Logged-in user features, for **managing/tracking** an account. They use a user
+session token (a JWT), **not** the SMM API key — buying stays guest-first.
+
+| Command                                | Auth  | Description                                                       |
+| -------------------------------------- | ----- | ---------------------------------------------------------------- |
+| `sub-reseller dashboard`               | token | Child-panel summary (balance, markup, cap, client/order counts). |
+| `sub-reseller clients`                 | token | List your linked clients (scoped).                               |
+| `sub-reseller create-client`           | token | Create a client linked to you (`--email --password [--name]`).  |
+| `sub-reseller markup <percent>`        | token | Set your own markup % (clamped by the panel cap).               |
+| `sub-reseller recharge <clientId>`     | token | Recharge a client's wallet (`--amount [--idempotency-key]`).    |
+| `sub-reseller orders`                  | token | Orders of your clients (scoped).                                |
+| `sub-reseller profit`                  | token | Profit report (cost × revenue × profit).                        |
+| `sub-reseller invite [--rotate]`       | token | Get (or rotate) your self-service signup link.                  |
+| `points rewards`                       | token | Tier + point multiplier + daily streak state.                   |
+| `points claim-streak`                  | token | Claim today's streak bonus (1/day-UTC).                         |
+| `points missions`                      | token | Weekly missions state.                                          |
+| `points claim-mission <missionId>`     | token | Claim one mission's points.                                     |
+| `points roulette` / `points spin`      | token | Daily roulette state / spin it (1/day-UTC).                     |
+| `points badges`                        | token | Your achievements/badges.                                       |
+| `points leaderboard`                   | token | Anonymized ranking with your position.                          |
+| `points perks`                         | token | Perks for all tiers + your current tier.                        |
+| `points referrals`                     | token | Gamified referral progress.                                     |
+| `points milestones`                    | token | Nearest milestone + campaign countdown.                         |
+| `points redeem <amount>`               | token | Redeem points into wallet credit.                               |
+| `reseller-checkout`                    | token | Create the reseller-plan checkout (`--method`).                 |
 
 Full reference, flags, and example outputs: [`docs/cli.md`](https://github.com/SocialGOcompany/socialgo-tools/blob/main/docs/cli.md).
 
@@ -144,6 +175,27 @@ socialgo order add --service 1234 --link https://insta.com/p/abc --quantity 1000
 
 # Track it
 socialgo order status 98765
+```
+
+### Optional: management mode (sub-reseller panel & gamification)
+
+Only if you're a logged-in reseller/user and want to manage clients or
+points. Uses a **user session token**, not the API key:
+
+```bash
+export SOCIALGO_TOKEN="your-user-jwt"   # from the panel (logged-in session)
+socialgo config                          # shows "Token: definido"
+
+# Sub-reseller child panel
+socialgo sub-reseller dashboard
+socialgo sub-reseller create-client --email client@example.com --password "s3cret!!" --name "Client"
+socialgo sub-reseller recharge <clientId> --amount 25
+socialgo sub-reseller invite             # self-service signup link
+
+# Gamification / points
+socialgo points rewards
+socialgo points claim-streak
+socialgo points redeem 100
 ```
 
 ### Scripting

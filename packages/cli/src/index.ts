@@ -38,6 +38,7 @@ import {
   type RecommendedService,
   type StorefrontPackage,
   type SubscriptionListItem,
+  UUID_RE,
 } from "./client.js";
 import type { SmmOrderStatus } from "@socialgo/sdk";
 
@@ -409,18 +410,29 @@ program
   .version("0.2.0")
   .option("--json", "saída em JSON cru (para scripts)", false)
   .option("--api-url <url>", "base da API (sobrescreve SOCIALGO_API_URL)")
-  .option("--key <key>", "chave de API (sobrescreve SOCIALGO_API_KEY)")
+  .option("--key <key>", "chave de API SMM (sobrescreve SOCIALGO_API_KEY)")
+  .option(
+    "--token <jwt>",
+    "token de SESSÃO do usuário, JWT (sobrescreve SOCIALGO_TOKEN) — só p/ comandos de gestão (sub-reseller/points)",
+  )
   .addHelpText(
     "after",
     `
 Caminho PRINCIPAL — GUEST (sem conta, sem cadastro, sem chave):
   ${c.bold("Qualquer um compra sem ter conta.")} NÃO precisa de SOCIALGO_API_KEY.
     Comandos guest-*: ${c.cyan("guest-services")} → ${c.cyan("guest-gateways")} → ${c.cyan("guest-order")} → ${c.cyan("guest-status")}.
+    Cross-sell keyless (próximos passos): ${c.cyan("guest-recommend")} — sem conta, sem chave.
     O e-mail no guest-order é só CONTATO (recibo/rastreio) — não cria conta nem senha.
 
 Opcional — REVENDEDOR (com conta + chave), para MELHOR ACOMPANHAMENTO:
   Histórico de pedidos, carteira/saldo, refill, assinaturas. Requer SOCIALGO_API_KEY.
     Demais comandos (balance, services, order, wallet, …). Só use se já tiver conta.
+
+Gestão/acompanhamento AUTENTICADA (requer SOCIALGO_TOKEN — JWT de usuário logado):
+  Painel de sub-revenda e gamificação. NÃO usa a SOCIALGO_API_KEY; é um token de sessão.
+    ${c.cyan("sub-reseller")} (dashboard/clients/create-client/markup/recharge/orders/profit/invite)
+    ${c.cyan("points")} (rewards/claim-streak/missions/claim-mission/roulette/spin/badges/leaderboard/perks/referrals/milestones/redeem)
+    ${c.cyan("reseller-checkout")} (compra o plano de revendedor)
 
 Configuração:
   ${c.bold("SOCIALGO_API_URL")} aponta a base da API (default https://api.usesocialgo.com).
@@ -431,6 +443,7 @@ Exemplos (GUEST — sem conta, sem chave) — caminho principal:
   socialgo guest-services --platform instagram --q seguidores   # <serviceId> = UUID na coluna ID
   socialgo guest-gateways
   socialgo guest-order <serviceId> --email voce@ex.com --link https://insta.com/seuperfil --quantity 1000
+  socialgo guest-recommend --platform instagram          # cross-sell sem chave
   socialgo guest-status <orderId> --token <guestToken>
 
 Exemplos (REVENDEDOR — requer chave):
@@ -451,6 +464,7 @@ Exemplos (REVENDEDOR — requer chave):
   socialgo subscription list
   socialgo coupon validate PROMO10
   socialgo affiliate stats
+  socialgo affiliate request-payout --amount 50 --method pix --yes   # SACA (requer token)
   socialgo loyalty
   socialgo recommend 1234
   socialgo campaign build --budget 100 --days 30 --platform instagram --goal followers
@@ -459,8 +473,8 @@ Exemplos (REVENDEDOR — requer chave):
   );
 
 function getClient(): SocialGoClient {
-  const opts = program.opts<{ apiUrl?: string; key?: string }>();
-  return new SocialGoClient({ baseUrl: opts.apiUrl, apiKey: opts.key });
+  const opts = program.opts<{ apiUrl?: string; key?: string; token?: string }>();
+  return new SocialGoClient({ baseUrl: opts.apiUrl, apiKey: opts.key, token: opts.token });
 }
 
 // config -----------------------------------------------------------------------
@@ -469,15 +483,23 @@ program
   .command("config")
   .description("mostra a configuração atual (base da API + se há chave) e como defini-la")
   .action(() => {
-    const opts = program.opts<{ apiUrl?: string; key?: string }>();
+    const opts = program.opts<{ apiUrl?: string; key?: string; token?: string }>();
     const client = getClient();
     if (shouldJson()) {
       return printJson({
         apiUrl: client.resolvedBaseUrl,
         hasKey: client.hasKey,
+        hasToken: client.hasToken,
         source: {
           apiUrl: opts.apiUrl ? "--api-url" : process.env.SOCIALGO_API_URL ? "SOCIALGO_API_URL" : "default",
           key: opts.key ? "--key" : process.env.SOCIALGO_API_KEY ? "SOCIALGO_API_KEY" : "none",
+          token: opts.token
+            ? "--token"
+            : process.env.SOCIALGO_TOKEN
+              ? "SOCIALGO_TOKEN"
+              : process.env.SOCIALGO_USER_TOKEN
+                ? "SOCIALGO_USER_TOKEN"
+                : "none",
         },
       });
     }
@@ -485,6 +507,9 @@ program
     out(`  ${c.bold("API URL")}  ${c.cyan(client.resolvedBaseUrl)}`);
     out(
       `  ${c.bold("Chave")}    ${client.hasKey ? c.green("definida") : c.yellow("ausente (opcional)")}`,
+    );
+    out(
+      `  ${c.bold("Token")}    ${client.hasToken ? c.green("definido") : c.yellow("ausente (só p/ gestão: sub-reseller/points)")}`,
     );
     out();
     if (!client.hasKey) {
@@ -916,7 +941,7 @@ coupon
 
 const affiliate = program
   .command("affiliate")
-  .description("programa de afiliados do seu usuário");
+  .description("programa de afiliados: stats/link (requer chave) · request-payout (requer token)");
 
 affiliate
   .command("stats")
@@ -952,6 +977,44 @@ affiliate
       handleError(err);
     }
   });
+
+affiliate
+  .command("request-payout")
+  .description("[gestão · requer token] SOLICITA um saque do seu saldo de afiliado (move dinheiro)")
+  .requiredOption("--amount <valor>", "valor a sacar (>= saque mínimo)", (v) => parseFloat(v))
+  .option("--method <metodo>", "método de saque preferido (ex.: pix, usdt)")
+  .option("--note <obs>", "observação (ex.: chave PIX/endereço)")
+  .option("--yes", "confirma o saque sem prompt (operação financeira)", false)
+  .option("--dry-run", "só mostra o que faria, sem sacar", false)
+  .action(
+    async (opts: { amount: number; method?: string; note?: string; yes: boolean; dryRun: boolean }) => {
+      try {
+        if (!Number.isFinite(opts.amount) || opts.amount <= 0) {
+          fail("--amount precisa ser um número positivo.");
+        }
+        const preview = { action: "request-payout", amount: opts.amount, method: opts.method ?? null };
+        if (opts.dryRun || !opts.yes) {
+          if (shouldJson()) return printJson({ willExecute: false, preview });
+          out(c.yellow("Saque NÃO executado (operação financeira)."));
+          out(`  Sacaria ${c.bold(String(opts.amount))}${opts.method ? ` via ${opts.method}` : ""}.`);
+          out(c.dim("  Confirme com --yes para sacar de verdade."));
+          return;
+        }
+        const r = await getClient().affiliateRequestPayout({
+          amount: opts.amount,
+          method: opts.method,
+          note: opts.note,
+        });
+        if (shouldJson()) return printJson(r);
+        out(`${c.green("✔")} Saque solicitado.`);
+        out(`  ${c.bold("ID")}      ${c.cyan(r.id)}`);
+        out(`  ${c.bold("Valor")}   ${r.amount}`);
+        out(`  ${c.bold("Status")}  ${r.status}`);
+      } catch (err) {
+        handleError(err);
+      }
+    },
+  );
 
 // loyalty ----------------------------------------------------------------------
 
@@ -1254,6 +1317,60 @@ program
   });
 
 program
+  .command("guest-recommend [serviceIdOrPlatform]")
+  .description("cross-sell PÚBLICO (sem chave): próximos serviços a partir de um serviço/plataforma")
+  .option("--service <uuid>", "serviço-âncora (UUID de guest-services)")
+  .option("--platform <plataforma>", "plataforma (instagram, tiktok, …)")
+  .option("--limit <n>", "limite de resultados (1-24)", (v) => parseInt(v, 10))
+  .addHelpText(
+    "after",
+    `
+Par guest-first de ${c.cyan("socialgo recommend")} (que exige chave). Aqui é keyless.
+O argumento posicional é um atalho: se parece UUID vira --service, senão --platform.
+O ${c.bold("id")} retornado serve direto como <serviceId> em ${c.cyan("socialgo guest-order")}.
+
+Exemplos:
+  socialgo guest-recommend --platform instagram
+  socialgo guest-recommend <serviceUuid> --limit 5
+`,
+  )
+  .action(
+    async (arg: string | undefined, opts: { service?: string; platform?: string; limit?: number }) => {
+      try {
+        let serviceId = opts.service;
+        let platform = opts.platform;
+        if (arg !== undefined) {
+          // Atalho: UUID → --service; qualquer outra coisa → --platform.
+          if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(arg)) {
+            serviceId = serviceId ?? arg;
+          } else {
+            platform = platform ?? arg;
+          }
+        }
+        const items = await getClient().guestRecommend({
+          serviceId,
+          platform,
+          limit: Number.isFinite(opts.limit as number) ? opts.limit : undefined,
+        });
+        if (shouldJson()) return printJson(items);
+        if (items.length === 0) {
+          out(c.yellow("Nenhuma recomendação encontrada."));
+          return;
+        }
+        out(c.bold(`${items.length} recomendação(ões) — use o ID em 'socialgo guest-order':`));
+        out();
+        for (const s of items) {
+          const reason = s.reason ? c.dim(` [${s.reason}]`) : "";
+          const plat = s.platform ? c.dim(` · ${s.platform}`) : "";
+          out(`  ${c.cyan(s.id)}  ${c.bold(s.name)}${plat}${reason}`);
+        }
+      } catch (err) {
+        handleError(err);
+      }
+    },
+  );
+
+program
   .command("guest-order <serviceId>")
   .description("cria um pedido PÚBLICO (sem conta / sem chave) e devolve a URL de pagamento")
   .requiredOption(
@@ -1374,6 +1491,375 @@ program
       const status = await getClient().guestOrderStatus(id, { token: opts.token, email: opts.email });
       if (shouldJson()) return printJson(status);
       renderGuestStatus(status);
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+// ════════════════════════════════════════════════════════════════════════════
+//  AUTENTICADOS — para GESTÃO/ACOMPANHAMENTO (precisam de SOCIALGO_TOKEN, o JWT
+//  de usuário logado — NÃO da SOCIALGO_API_KEY do protocolo SMM, NEM do guest).
+//  Cobrem rotas REST do painel sob requireUser:
+//    • sub-reseller  → painel-filho do revendedor (clientes, markup, saldo, lucro, convite)
+//    • points        → gamificação (recompensas, streak, missões, roleta, badges, …)
+//    • reseller-checkout → onboarding (compra do plano de revendedor)
+//  Comprar segue keyless via guest-* — estes comandos NÃO mudam o guest-first.
+// ════════════════════════════════════════════════════════════════════════════
+
+// sub-reseller (painel-filho do revendedor) -----------------------------------
+
+const subReseller = program
+  .command("sub-reseller")
+  .description("[gestão · requer token] painel-filho do revendedor: clientes, markup, saldo, lucro, convite");
+
+subReseller
+  .command("dashboard")
+  .description("resumo do painel-filho (saldo, markup, teto, nº de clientes/pedidos)")
+  .action(async () => {
+    try {
+      const d = await getClient().subDashboard();
+      if (shouldJson()) return printJson(d);
+      out(c.bold("Painel de sub-revenda"));
+      if (d.balance !== undefined) out(`  ${c.bold("Saldo")}        ${c.green(String(d.balance))}`);
+      if (d.markupPercent !== undefined) out(`  ${c.bold("Markup")}       ${d.markupPercent}%`);
+      if (d.markupCap !== undefined) out(`  ${c.bold("Teto markup")}  ${d.markupCap}%`);
+      if (d.clientCount !== undefined) out(`  ${c.bold("Clientes")}     ${d.clientCount}`);
+      if (d.orderCount !== undefined) out(`  ${c.bold("Pedidos")}      ${d.orderCount}`);
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+subReseller
+  .command("markup <percent>")
+  .description("define o PRÓPRIO markup (%, clampado pelo teto do painel)")
+  .action(async (percent: string) => {
+    try {
+      const value = parseFloat(percent);
+      if (!Number.isFinite(value) || value < 0) fail("O markup precisa ser um número >= 0.");
+      const r = await getClient().subSetMarkup(value);
+      if (shouldJson()) return printJson(r);
+      out(`${c.green("✔")} Markup definido: ${c.bold(`${r.markupPercent}%`)} ${c.dim("(efetivo, após teto)")}`);
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+subReseller
+  .command("clients")
+  .description("lista seus clientes vinculados (escopado)")
+  .action(async () => {
+    try {
+      const items = await getClient().subClients();
+      if (shouldJson()) return printJson(items);
+      if (items.length === 0) {
+        out(c.yellow("Nenhum cliente vinculado ainda."));
+        return;
+      }
+      for (const cl of items) {
+        out(`  ${c.cyan(cl.id)}  ${c.bold(cl.email)}${cl.name ? c.dim(`  (${cl.name})`) : ""}`);
+      }
+      out();
+      out(c.dim(`${items.length} cliente(s). Recarregue um: socialgo sub-reseller recharge <clientId> --amount <v>`));
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+subReseller
+  .command("create-client")
+  .description("cria um cliente vinculado a você (cria credenciais)")
+  .requiredOption("--email <email>", "e-mail (login) do cliente")
+  .requiredOption("--password <senha>", "senha inicial (mín. 8 caracteres)")
+  .option("--name <nome>", "nome do cliente (opcional)")
+  .option("--yes", "confirma a criação sem prompt (cria credenciais)", false)
+  .option("--dry-run", "só mostra o que faria, sem criar", false)
+  .action(
+    async (opts: { email: string; password: string; name?: string; yes: boolean; dryRun: boolean }) => {
+      try {
+        if (opts.password.length < 8) fail("--password precisa ter ao menos 8 caracteres.");
+        const preview = { action: "create-client", email: opts.email, name: opts.name ?? null };
+        if (opts.dryRun || !opts.yes) {
+          if (shouldJson()) return printJson({ willExecute: false, preview });
+          out(c.yellow("Cliente NÃO criado (cria credenciais)."));
+          out(`  Criaria o cliente ${c.bold(opts.email)}${opts.name ? ` (${opts.name})` : ""} com a senha informada.`);
+          out(c.dim("  Confirme com --yes para criar de verdade."));
+          return;
+        }
+        const cl = await getClient().subCreateClient({
+          email: opts.email,
+          password: opts.password,
+          name: opts.name,
+        });
+        if (shouldJson()) return printJson(cl);
+        out(`${c.green("✔")} Cliente criado.`);
+        out(`  ${c.bold("ID")}     ${c.cyan(cl.id)}`);
+        out(`  ${c.bold("E-mail")} ${cl.email}`);
+        if (cl.name) out(`  ${c.bold("Nome")}   ${cl.name}`);
+      } catch (err) {
+        handleError(err);
+      }
+    },
+  );
+
+subReseller
+  .command("orders")
+  .description("pedidos dos seus clientes (escopado)")
+  .action(async () => {
+    try {
+      const items = await getClient().subOrders();
+      if (shouldJson()) return printJson(items);
+      renderOrdersTable(items);
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+subReseller
+  .command("recharge <clientId>")
+  .description("recarrega a carteira de um cliente seu (sai do seu saldo · move dinheiro)")
+  .requiredOption("--amount <valor>", "valor a creditar no cliente", (v) => parseFloat(v))
+  .option("--idempotency-key <chave>", "chave idempotente (default: gerada automaticamente p/ evitar recarga dupla)")
+  .option("--yes", "confirma a recarga sem prompt (operação financeira)", false)
+  .option("--dry-run", "só mostra o que faria, sem recarregar", false)
+  .action(
+    async (
+      clientId: string,
+      opts: { amount: number; idempotencyKey?: string; yes: boolean; dryRun: boolean },
+    ) => {
+      try {
+        if (!Number.isFinite(opts.amount) || opts.amount <= 0) {
+          fail("--amount precisa ser um número positivo.");
+        }
+        // Casa com a coluna UUID do Postgres e com o que o MCP já exige
+        // (z.string().uuid()): falha limpa ANTES da API, sem 22P02 → 500 cru.
+        if (!UUID_RE.test(clientId)) {
+          fail(
+            `clientId inválido: "${clientId}" não é um UUID. ` +
+              `Pegue o id em 'socialgo sub-reseller clients' (campo id).`,
+          );
+        }
+        const preview = { action: "recharge", clientId, amount: opts.amount };
+        if (opts.dryRun || !opts.yes) {
+          if (shouldJson()) return printJson({ willExecute: false, preview });
+          out(c.yellow("Recarga NÃO executada (operação financeira)."));
+          out(`  Creditaria ${c.bold(String(opts.amount))} na carteira de ${c.cyan(clientId)} (sai do seu saldo).`);
+          out(c.dim("  Confirme com --yes para recarregar de verdade."));
+          return;
+        }
+        const r = await getClient().rechargeClient({
+          clientId,
+          amount: opts.amount,
+          idempotencyKey: opts.idempotencyKey,
+        });
+        if (shouldJson()) return printJson(r);
+        out(`${c.green("✔")} Carteira do cliente ${c.cyan(clientId)} recarregada em ${c.green(String(opts.amount))}.`);
+      } catch (err) {
+        handleError(err);
+      }
+    },
+  );
+
+subReseller
+  .command("profit")
+  .description("relatório de lucro (custo × receita × lucro), escopado a você")
+  .action(async () => {
+    try {
+      const r = await getClient().subProfit();
+      printJson(r);
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+subReseller
+  .command("invite")
+  .description("link de convite self-service (use --rotate para gerar um novo e invalidar o antigo)")
+  .option("--rotate", "rotaciona o código (invalida o link anterior)", false)
+  .action(async (opts: { rotate: boolean }) => {
+    try {
+      const client = getClient();
+      const r = opts.rotate ? await client.subRotateInvite() : await client.subInvite();
+      if (shouldJson()) return printJson(r);
+      out(`${c.bold("Convite")} ${opts.rotate ? c.yellow("(rotacionado — link antigo invalidado)") : ""}`);
+      out(`  ${c.bold("Código")}  ${c.cyan(r.code)}`);
+      out(`  ${c.bold("URL")}     ${c.cyan(r.url)}`);
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+// points (gamificação) --------------------------------------------------------
+
+const points = program
+  .command("points")
+  .description("[gestão · requer token] gamificação: recompensas, streak, missões, roleta, badges, resgate");
+
+points
+  .command("rewards")
+  .description("estado consolidado: tier + multiplicador (tier/campanha) + streak")
+  .action(async () => {
+    try {
+      printJson(await getClient().pointsRewardsState());
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+points
+  .command("claim-streak")
+  .description("reivindica o bônus de streak do dia (1/dia-UTC)")
+  .action(async () => {
+    try {
+      printJson(await getClient().pointsClaimStreak());
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+points
+  .command("missions")
+  .description("estado das missões semanais (progresso derivado)")
+  .action(async () => {
+    try {
+      printJson(await getClient().pointsMissions());
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+points
+  .command("claim-mission <missionId>")
+  .description("reivindica os pontos de UMA missão (idempotente por user+missão+semana)")
+  .action(async (missionId: string) => {
+    try {
+      printJson(await getClient().pointsClaimMission(missionId));
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+points
+  .command("roulette")
+  .description("estado da roleta diária (habilitada?, já girou?, prêmios)")
+  .action(async () => {
+    try {
+      printJson(await getClient().pointsRoulette());
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+points
+  .command("spin")
+  .description("gira a roleta do dia (1/dia-UTC)")
+  .action(async () => {
+    try {
+      printJson(await getClient().pointsSpinRoulette());
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+points
+  .command("badges")
+  .description("suas conquistas/badges")
+  .action(async () => {
+    try {
+      printJson(await getClient().pointsBadges());
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+points
+  .command("leaderboard")
+  .description("ranking anonimizado com sua posição")
+  .action(async () => {
+    try {
+      printJson(await getClient().pointsLeaderboard());
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+points
+  .command("perks")
+  .description("perks de todos os níveis + seu tier atual")
+  .action(async () => {
+    try {
+      printJson(await getClient().pointsPerks());
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+points
+  .command("referrals")
+  .description("progresso de indicações gamificadas")
+  .action(async () => {
+    try {
+      printJson(await getClient().pointsReferralProgress());
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+points
+  .command("milestones")
+  .description("marco mais próximo + countdown da campanha ativa")
+  .action(async () => {
+    try {
+      printJson(await getClient().pointsMilestones());
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+points
+  .command("redeem <amount>")
+  .description("resgata pontos creditando o valor na carteira")
+  .action(async (amount: string) => {
+    try {
+      const value = parseFloat(amount);
+      if (!Number.isFinite(value) || value <= 0) fail("O valor a resgatar precisa ser positivo.");
+      printJson(await getClient().pointsRedeem(value));
+    } catch (err) {
+      handleError(err);
+    }
+  });
+
+// reseller-checkout (onboarding revendedor) -----------------------------------
+
+program
+  .command("reseller-checkout")
+  .description("[gestão · requer token] cria o checkout de compra do PLANO de revendedor (gera cobrança)")
+  .requiredOption(
+    "--method <metodo>",
+    "gateway de pagamento ativo (veja 'socialgo guest-gateways')",
+  )
+  .option("--yes", "confirma a criação do checkout sem prompt (gera cobrança)", false)
+  .option("--dry-run", "só mostra o que faria, sem criar o checkout", false)
+  .action(async (opts: { method: string; yes: boolean; dryRun: boolean }) => {
+    try {
+      const preview = { action: "reseller-checkout", method: opts.method };
+      if (opts.dryRun || !opts.yes) {
+        if (shouldJson()) return printJson({ willExecute: false, preview });
+        out(c.yellow("Checkout NÃO criado (gera cobrança do plano de revendedor)."));
+        out(`  Criaria o checkout via ${c.bold(opts.method)} (preço forçado no servidor).`);
+        out(c.dim("  Confirme com --yes para criar de verdade."));
+        return;
+      }
+      const r = await getClient().resellerCheckout(opts.method);
+      if (shouldJson()) return printJson(r);
+      out(`${c.green("✔")} Checkout do plano de revendedor criado.`);
+      out(`  ${c.bold("Payment ID")}  ${c.cyan(String(r.paymentId))}`);
+      out(`  ${c.bold("Valor")}       ${r.amount} ${r.currency}`);
+      out();
+      out(c.bold("  Pague abrindo esta URL no navegador:"));
+      out(`  ${c.cyan(r.url)}`);
+      out();
+      out(c.dim("  Após o pagamento confirmar, sua conta vira revendedor."));
     } catch (err) {
       handleError(err);
     }
