@@ -5,9 +5,11 @@
 
 Official **Model Context Protocol** server for [SocialGO](https://github.com/SocialGOcompany/socialgo-tools).
 It lets AI assistants — Claude Desktop, Claude Code, Cursor, Cline, Windsurf,
-VS Code, and any MCP client — search your SMM catalog, place and track orders,
-request refills, and even run guest (no-account) checkouts, all from a
-natural-language conversation.
+VS Code, and any MCP client — buy SMM services straight from a natural-language
+conversation. The **main path is guest**: anyone can search the catalog and
+**buy with no account, no signup, and no API key** (`socialgo_guest_*` tools).
+An account + API key is **optional**, for **better tracking** — order history,
+wallet, refills — exposed by the reseller tools.
 
 Binary: **`socialgo-mcp`** · Transport: **stdio**
 
@@ -125,13 +127,16 @@ Configured entirely through environment variables — no secrets in code:
 
 **Two purchasing modes — how the AI should choose:**
 
-- **Guest (no account / no key)** — buy without an account, pay-per-order,
-  identified by email. **No API key required.** Funnel: `socialgo_guest_services`
-  → `socialgo_guest_gateways` → `socialgo_guest_order` → `socialgo_guest_order_status`,
-  all over the public `/guest/*` endpoints. Use this whenever the user has no
-  account or you have no key.
-- **Reseller (account)** — uses your API key and wallet balance for the
-  non-`guest` tools. Use only when authenticated with a key.
+- **Guest (no account / no key) — the main path.** Anyone buys without creating an
+  account and without an API key, pay-per-order. **No API key required.** Funnel:
+  `socialgo_guest_services` → `socialgo_guest_gateways` → `socialgo_guest_order` →
+  `socialgo_guest_order_status`, all over the public `/guest/*` endpoints. The only
+  detail asked is a **contact email** for the receipt/tracking — it is **not** a
+  signup or password, and no account is created. Use this by default.
+- **Reseller (account) — optional, for better tracking.** Uses an API key and
+  wallet balance for the non-`guest` tools (order history, wallet, refills,
+  subscriptions). Use only when the user is already authenticated with a key; never
+  ask the user to create an account for a guest purchase.
 
 > **Never commit a real API key.**
 
@@ -179,28 +184,30 @@ client configs for every editor are in
 > `buyer@example.com` and I'd like to pay with PIX.
 
 1. Assistant calls `socialgo_guest_services` (no key needed) (`query: "tiktok views"`,
-   `platform: "tiktok"`), picks a service by its `id`, confirms limits.
+   `platform: "tiktok"`), picks a service by its `id` (a UUID), confirms limits.
 2. Assistant calls `socialgo_guest_gateways` and offers only the active methods
    (`mercadopago` covers PIX).
-3. Assistant calls `socialgo_guest_order`:
+3. Assistant calls `socialgo_guest_order` (the email is just a contact for the
+   receipt — no account is created). `serviceId` is the UUID from step 1:
 
    ```jsonc
    {
      "email": "buyer@example.com",
-     "serviceId": "872",
+     "serviceId": "3f9b1c2a-7d4e-4a8b-9c1d-2e5f6a7b8c9d",
      "link": "https://www.tiktok.com/@user/video/123456789",
      "quantity": 500,
      "method": "mercadopago"
    }
    ```
 
-   → `{ "orderId": "ord_abc123", "guestToken": "gtok_9f8e7d6c", "url": "https://usesocialgo.com/guest/pay/ord_abc123", "amount": "1.20", "currency": "USD" }`
+   → `{ "orderId": "8a1d4e2f-6b3c-4d5e-9f0a-1b2c3d4e5f6a", "guestToken": "gtok_9f8e7d6c", "url": "https://usesocialgo.com/guest/pay/8a1d4e2f-6b3c-4d5e-9f0a-1b2c3d4e5f6a", "amount": "1.20", "currency": "USD" }`
 
 4. Assistant hands the `url` to the user to pay.
 5. After payment, assistant tracks with `socialgo_guest_order_status`
-   (`{ "id": "ord_abc123", "token": "gtok_9f8e7d6c" }`). A status of
-   `awaiting_payment` means it hasn't been paid yet; once confirmed, the order
-   begins delivery.
+   (`{ "id": "8a1d4e2f-6b3c-4d5e-9f0a-1b2c3d4e5f6a", "token": "gtok_9f8e7d6c" }`). A
+   status of `awaiting_payment` means it hasn't been paid yet; once confirmed, the
+   order begins delivery. (Want a full order history/wallet? That's the optional
+   account mode — not needed for this purchase.)
 
 ---
 

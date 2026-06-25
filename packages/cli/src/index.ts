@@ -413,19 +413,22 @@ program
   .addHelpText(
     "after",
     `
-Dois modos:
-  ${c.bold("GUEST (sem conta / sem chave)")} — comprar sem ter conta. NÃO precisa de SOCIALGO_API_KEY.
+Caminho PRINCIPAL — GUEST (sem conta, sem cadastro, sem chave):
+  ${c.bold("Qualquer um compra sem ter conta.")} NÃO precisa de SOCIALGO_API_KEY.
     Comandos guest-*: ${c.cyan("guest-services")} → ${c.cyan("guest-gateways")} → ${c.cyan("guest-order")} → ${c.cyan("guest-status")}.
-  ${c.bold("REVENDEDOR (com conta + chave)")} — opera a conta (saldo/pedidos debitados). Requer SOCIALGO_API_KEY.
-    Demais comandos (balance, services, order, wallet, …).
+    O e-mail no guest-order é só CONTATO (recibo/rastreio) — não cria conta nem senha.
+
+Opcional — REVENDEDOR (com conta + chave), para MELHOR ACOMPANHAMENTO:
+  Histórico de pedidos, carteira/saldo, refill, assinaturas. Requer SOCIALGO_API_KEY.
+    Demais comandos (balance, services, order, wallet, …). Só use se já tiver conta.
 
 Configuração:
   ${c.bold("SOCIALGO_API_URL")} aponta a base da API (default https://api.usesocialgo.com).
   ${c.bold("SOCIALGO_API_KEY")} é OPCIONAL: só os comandos de REVENDEDOR a usam. Os guest-* são keyless.
   Use as flags globais --api-url e --key, ou veja: ${c.cyan("socialgo config")}
 
-Exemplos (GUEST — sem conta, sem chave):
-  socialgo guest-services --platform instagram --q seguidores
+Exemplos (GUEST — sem conta, sem chave) — caminho principal:
+  socialgo guest-services --platform instagram --q seguidores   # <serviceId> = UUID na coluna ID
   socialgo guest-gateways
   socialgo guest-order <serviceId> --email voce@ex.com --link https://insta.com/seuperfil --quantity 1000
   socialgo guest-status <orderId> --token <guestToken>
@@ -1252,8 +1255,11 @@ program
 
 program
   .command("guest-order <serviceId>")
-  .description("cria um pedido PÚBLICO (sem conta) e devolve a URL de pagamento")
-  .requiredOption("--email <email>", "e-mail do comprador (para rastrear o pedido)")
+  .description("cria um pedido PÚBLICO (sem conta / sem chave) e devolve a URL de pagamento")
+  .requiredOption(
+    "--email <email>",
+    "e-mail de CONTATO (recibo/rastreio do pedido — NÃO cria conta nem senha)",
+  )
   .requiredOption("--link <url>", "link de destino (perfil/post/vídeo)")
   .option("--quantity <n>", "quantidade (opcional p/ tipos de lista)", (v) => parseInt(v, 10))
   .option(
@@ -1267,6 +1273,18 @@ program
   .option("--username <user>", "Mentions User Followers / Comment Likes: usuário-alvo")
   .option("--media <url>", "Mentions Media Likers: mídia-alvo")
   .option("--answer-number <n>", "Poll: número da resposta", (v) => parseInt(v, 10))
+  .addHelpText(
+    "after",
+    `
+O <serviceId> é o ID (UUID) listado por ${c.cyan("socialgo guest-services")}. NÃO precisa de
+conta nem de chave: o e-mail é só contato (recibo/rastreio), não cria cadastro.
+Quem quiser histórico/carteira/refill pode (opcional) usar o modo conta (com chave).
+
+Exemplo:
+  socialgo guest-services --platform instagram --q seguidores   # pega o <serviceId>
+  socialgo guest-order <serviceId> --email voce@ex.com --link https://insta.com/seuperfil --quantity 1000
+`,
+  )
   .action(
     async (
       serviceId: string,

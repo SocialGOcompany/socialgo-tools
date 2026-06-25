@@ -30,7 +30,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test": "node --test",
+    "test": "tsc -p tsconfig.test.json && node --test .test-dist/",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {

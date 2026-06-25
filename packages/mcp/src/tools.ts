@@ -42,25 +42,26 @@
  * couponValidate, affiliateStats, loyaltyStatus, recommend, campaignBuild, storefront…).
  * Todas as extensões são ESCOPADAS ao userId da `key` (dados do PRÓPRIO usuário).
  *
- * ── Dois modos: GUEST (sem chave) vs RESELLER (com chave) ────────────────────
- * O MCP atende DOIS perfis de uso e o agente deve escolher pelo contexto:
+ * ── Caminho PRINCIPAL: GUEST (sem conta) · OPCIONAL: RESELLER (com chave) ─────
+ * O MCP atende DOIS perfis e o agente escolhe pelo contexto:
  *
- *   • GUEST / SEM CONTA / SEM CHAVE (pay-per-order) — comprar sem ter conta no
- *     painel. NÃO precisa de SOCIALGO_API_KEY. Funil 100% keyless:
+ *   • GUEST / SEM CONTA / SEM CHAVE (pay-per-order) — CAMINHO PRINCIPAL. Qualquer
+ *     pessoa compra SEM criar conta e SEM SOCIALGO_API_KEY. Funil 100% keyless:
  *       socialgo_guest_services  → acha o serviceId (catálogo público)
  *       socialgo_guest_gateways  → métodos de pagamento ativos
  *       socialgo_guest_order     → cria o pedido + devolve URL de pagamento
  *       socialgo_guest_order_status → acompanha pelo orderId + token/email
- *     Use ESTE caminho sempre que o usuário NÃO tem conta ou você NÃO tem chave.
+ *     O único dado pedido é um e-mail de CONTATO (recibo/rastreio) — NÃO é
+ *     cadastro nem senha, e nenhuma conta é criada. Use ESTE caminho por padrão.
  *
- *   • RESELLER / COM CONTA / COM CHAVE — operar a conta do revendedor (saldo,
- *     pedidos debitados do saldo, carteira, assinaturas, afiliado, etc.). Requer
- *     SOCIALGO_API_KEY. As tools `socialgo_*` (sem prefixo guest) caem aqui.
- *     Use SÓ quando o usuário está autenticado com uma chave de API.
+ *   • RESELLER / COM CONTA / COM CHAVE — OPCIONAL, para MELHOR ACOMPANHAMENTO:
+ *     histórico de pedidos, carteira/saldo, status detalhado, refill, assinaturas,
+ *     afiliado, etc. Requer SOCIALGO_API_KEY. As tools `socialgo_*` (sem prefixo
+ *     guest) caem aqui. Use SÓ quando o usuário JÁ está autenticado com uma chave.
  *
- * Regra de roteamento p/ o agente: sem conta/sem chave → tools socialgo_guest_*;
- * com conta + chave → tools de revendedor. Nunca peça a chave ao usuário para um
- * fluxo guest — guest é keyless.
+ * Regra de roteamento p/ o agente: sem conta/sem chave → tools socialgo_guest_*
+ * (padrão); com conta + chave → tools de revendedor (acompanhamento). NUNCA peça a
+ * chave nem que o usuário crie conta para um fluxo guest — guest é keyless.
  *
  * ── Transporte ──────────────────────────────────────────────────────────────
  * Toda tool fala com a API do SocialGO via HTTP. As tools de revendedor usam o
@@ -100,10 +101,11 @@ function apiKey(): string {
   const key = process.env.SOCIALGO_API_KEY;
   if (!key) {
     throw new Error(
-      "Esta é uma tool de REVENDEDOR e precisa de SOCIALGO_API_KEY (conta + saldo). " +
-        "Para comprar SEM conta, NÃO use esta tool: use as tools socialgo_guest_* " +
-        "(socialgo_guest_services → socialgo_guest_gateways → socialgo_guest_order), " +
-        "que NÃO precisam de chave. A chave fica em Conta › API no painel (só se você tiver conta).",
+      "Esta tool é OPCIONAL (modo REVENDEDOR, para melhor acompanhamento: histórico, " +
+        "carteira, refill) e precisa de SOCIALGO_API_KEY. Para COMPRAR não é necessária: " +
+        "use as tools socialgo_guest_* (socialgo_guest_services → socialgo_guest_gateways → " +
+        "socialgo_guest_order), que NÃO precisam de conta nem chave — qualquer um compra como " +
+        "guest. A chave (opcional) fica em Conta › API no painel, só para quem tem conta.",
     );
   }
   return key;
@@ -283,6 +285,14 @@ interface ActiveGateway {
  * Fallback mínimo e seguro de métodos de guest checkout. Usado SÓ quando
  * `GET /gateways/active` falha (rede/painel fora) — não é a fonte da verdade,
  * é só um piso para a tool não travar. A lista REAL vem sempre do painel.
+ *
+ * IMPORTANTE (degradação): se o painel não responde e `method` é omitido, o
+ * pedido cai em FALLBACK_GUEST_METHODS[0]. Por isso esta lista deve conter
+ * APENAS gateways que estão SEMPRE habilitados no painel (always-on). Se um
+ * gateway aqui puder estar desligado no painel, um pedido guest pode ser criado
+ * apontando para um método de pagamento não aceito → ordem `awaiting_payment`
+ * presa. Mantenha aqui só os métodos garantidamente ativos; o caminho normal
+ * (painel online) sempre valida contra a lista fresca de /gateways/active.
  */
 const FALLBACK_GUEST_METHODS: readonly string[] = ["mercadopago", "stripe", "crypto"];
 
@@ -559,7 +569,8 @@ export async function registerTools(server: McpServer): Promise<void> {
   // Aceita 1 pedido (`order`) OU vários (`orders` em array → CSV no protocolo).
   server.tool(
     "socialgo_order_status",
-    "MODO REVENDEDOR (requer SOCIALGO_API_KEY). Pedido feito SEM conta? Use socialgo_guest_order_status. " +
+    "OPCIONAL — modo REVENDEDOR (requer SOCIALGO_API_KEY), para acompanhar pedidos da CONTA. " +
+      "Pedido feito SEM conta (guest)? Use socialgo_guest_order_status (não precisa de chave). " +
       "Consulta o status de um ou mais pedidos da CONTA (status, charge, start_count, remains, currency). " +
       "Passe `order` para um único pedido OU `orders` (lista) para vários de uma vez.",
     {
@@ -677,9 +688,10 @@ export async function registerTools(server: McpServer): Promise<void> {
   /* ───────────────────────── 9) socialgo_orders ───────────────────────────── */
   server.tool(
     "socialgo_orders",
-    "MODO REVENDEDOR (requer SOCIALGO_API_KEY + conta). Sem conta / sem chave? Rastreie pedidos guest com socialgo_guest_order_status. " +
+    "OPCIONAL — modo REVENDEDOR (requer SOCIALGO_API_KEY + conta), para MELHOR ACOMPANHAMENTO. " +
+      "Comprar NÃO exige isto: sem conta/sem chave, use o funil guest e rastreie com socialgo_guest_order_status. " +
       "Lista o histórico de pedidos da conta no painel (id, charge, status, start_count, " +
-      "remains, link, quantity, created_at).",
+      "remains, link, quantity, created_at) — útil para quem tem conta e quer ver vários pedidos de uma vez.",
     {},
     async () => {
       try {
@@ -696,11 +708,14 @@ export async function registerTools(server: McpServer): Promise<void> {
   // client.guestServices da CLI. A busca é server-side (platform/q/limit).
   server.tool(
     "socialgo_guest_services",
-    "COMECE AQUI se o usuário NÃO tem conta / você NÃO tem API key — NÃO precisa de chave. " +
-      "Catálogo PÚBLICO do painel para achar o `serviceId` que vai em socialgo_guest_order. " +
+    "COMECE AQUI — caminho PRINCIPAL de compra. Qualquer pessoa compra SEM conta, SEM cadastro e " +
+      "SEM API key. NÃO peça login nem chave. " +
+      "Catálogo PÚBLICO do painel para achar o `serviceId` que vai em socialgo_guest_order (passo 1 do " +
+      "funil guest: services → order). " +
       "Filtra por `platform` e/ou `q` (termo) e devolve `{ id, name, type, platform, sellRate, min, max, " +
       "refill, cancel, dripfeed }` — o `id` é o `serviceId` do guest checkout. " +
-      "Este é o equivalente keyless de socialgo_services: use ESTE no fluxo guest e socialgo_services só com conta+chave.",
+      "Este é o equivalente keyless de socialgo_services: use SEMPRE este no fluxo guest. " +
+      "socialgo_services (com conta+chave) é OPCIONAL, só para quem já tem conta e quer acompanhamento.",
     {
       query: z
         .string()
@@ -737,28 +752,33 @@ export async function registerTools(server: McpServer): Promise<void> {
   // ao usuário e instruí-lo a pagar para o pedido seguir.
   server.tool(
     "socialgo_guest_order",
-    "COMECE AQUI se o usuário NÃO tem conta / você NÃO tem API key — NÃO precisa de chave (pay-per-order). " +
-      "Cria um pedido SMM SEM precisar de conta e retorna a URL de pagamento. " +
-      "Fluxo para conduzir a compra com o usuário:\n" +
-      "1. Use socialgo_guest_services (SEM API key) para achar o `serviceId` quando o comprador não tem conta; " +
-      "só use socialgo_services se o usuário estiver autenticado com SOCIALGO_API_KEY.\n" +
-      "2. Peça ao usuário o e-mail (para rastreio/recibo), o `link` (perfil/post/vídeo alvo) e a `quantity`.\n" +
-      "3. Escolha o método de pagamento (`method`). Os métodos REALMENTE ativos no painel agora são: " +
+    "CAMINHO PRINCIPAL de compra — pay-per-order SEM conta, SEM cadastro e SEM API key. " +
+      "Cria o pedido SMM e retorna a URL de pagamento. NÃO peça login nem chave ao usuário.\n" +
+      "Fluxo para conduzir a compra:\n" +
+      "1. Use socialgo_guest_services (SEM API key) para achar o `serviceId`. (socialgo_services só se o " +
+      "usuário já estiver autenticado com SOCIALGO_API_KEY — opcional, para acompanhamento.)\n" +
+      "2. Peça o `link` (perfil/post/vídeo alvo), a `quantity` e um `email` de CONTATO. O e-mail serve só " +
+      "para recibo e rastreio do pedido — NÃO é cadastro nem senha, e nenhuma conta é criada.\n" +
+      "3. (OPCIONAL) Método de pagamento (`method`). Você NÃO precisa chamar socialgo_guest_gateways nem " +
+      "passar `method`: se omitir, usa-se automaticamente o 1º gateway ativo do painel. Só escolha um método " +
+      "se for OFERECER a opção ao usuário — nesse caso chame socialgo_guest_gateways para a lista fresca e " +
+      "ofereça SÓ esses (não afirme aceitar métodos fora dela). Métodos ativos no boot: " +
       bootMethodsLabel +
-      ". NÃO afirme que aceita métodos fora dessa lista — chame socialgo_guest_gateways para a lista fresca " +
-      "e ofereça SÓ esses ao usuário.\n" +
+      ".\n" +
       "4. Chame esta tool. Ela devolve `{ orderId, guestToken, url, amount, currency }`. " +
       "ENTREGUE a `url` ao usuário e diga para abrir e concluir o pagamento — o pedido só é enviado " +
       "ao fornecedor APÓS o pagamento confirmar. GUARDE `orderId` + `guestToken` para acompanhar via " +
-      "socialgo_guest_order_status. Nenhuma cobrança sai de saldo de conta aqui; o usuário paga direto no checkout.",
+      "socialgo_guest_order_status. Nenhuma cobrança sai de saldo de conta aqui; o usuário paga direto no checkout.\n" +
+      "Dica: quem quiser histórico de pedidos, carteira e refill pode (OPCIONALMENTE) criar conta e usar as " +
+      "tools de revendedor — mas para esta compra nada disso é necessário.",
     {
       email: z
         .string()
         .email()
-        .describe("E-mail do comprador. Usado para achar/criar um usuário guest e para rastrear o pedido."),
+        .describe("E-mail de CONTATO do comprador, só para recibo e rastreio do pedido (NÃO é cadastro/conta nem senha)."),
       serviceId: z
         .string()
-        .describe("Id do serviço a comprar (obtido em socialgo_services)."),
+        .describe("Id do serviço a comprar (obtido em socialgo_guest_services — o `id` retornado lá)."),
       link: z
         .string()
         .min(1)
@@ -821,7 +841,7 @@ export async function registerTools(server: McpServer): Promise<void> {
   // checkout — nunca uma lista fixa. Não usa API key (rota pública).
   server.tool(
     "socialgo_guest_gateways",
-    "Parte do funil guest (sem conta / sem API key — não precisa de chave). " +
+    "Parte do funil guest PRINCIPAL (sem conta / sem cadastro / sem API key). " +
       "Lista os métodos de pagamento ATUALMENTE ativos no painel para o guest checkout (pay-per-order). " +
       "Retorna `{ gateways: [{ gateway, label, kind, coins, notice }] }`, onde `gateway` é o valor a passar " +
       "como `method` em socialgo_guest_order. Consulte ANTES de oferecer formas de pagamento: ofereça SÓ os " +
@@ -851,11 +871,13 @@ export async function registerTools(server: McpServer): Promise<void> {
   // campos seguros do próprio pedido — nunca PII de terceiros.
   server.tool(
     "socialgo_guest_order_status",
-    "Consulta o status de um pedido guest (criado por socialgo_guest_order), sem precisar de conta. " +
+    "Acompanha um pedido guest (criado por socialgo_guest_order) SEM precisar de conta nem API key. " +
       "Passe o `id` do pedido (orderId) e prove a posse com `token` (o guestToken retornado na criação — " +
       "caminho preferido) OU com o `email` usado na compra. Retorna { id, status, serviceName, link, " +
       "quantity, charge, startCount, remains, createdAt }. Use para dizer ao usuário se o pagamento já " +
-      "confirmou e o pedido começou a ser entregue (status 'awaiting_payment' = ainda não pago).",
+      "confirmou e o pedido começou a ser entregue (status 'awaiting_payment' = ainda não pago). " +
+      "Para acompanhar VÁRIOS pedidos num histórico, o usuário pode (OPCIONALMENTE) ter conta + API key " +
+      "e usar socialgo_orders / socialgo_order_status — mas para um pedido guest isto aqui basta.",
     {
       id: z.string().describe("Id do pedido guest (orderId retornado por socialgo_guest_order)."),
       token: z
@@ -889,11 +911,11 @@ export async function registerTools(server: McpServer): Promise<void> {
   // Saldo + extrato recente da carteira do PRÓPRIO usuário (action=wallet).
   server.tool(
     "socialgo_wallet",
-    "RESELLER MODE (requires SOCIALGO_API_KEY + account). No account / no key? Do NOT use this — guest checkout is pay-per-order. " +
-      "Returns the account wallet for the current API user: current `balance` + `currency` plus the most " +
-      "recent ledger `transactions` ({ id, type, amount, balanceAfter, description, createdAt }). " +
-      "Use this for a richer view than socialgo_balance (which is balance-only) — e.g. to explain recent " +
-      "deposits/charges. Scoped to the userId of the API key.",
+    "MODO REVENDEDOR (requer SOCIALGO_API_KEY + conta). Sem conta / sem chave? NÃO use isto — o caminho PRINCIPAL é o guest (pay-per-order via socialgo_guest_order). " +
+      "Retorna a carteira da conta do usuário da API atual: `balance` + `currency` atuais mais as " +
+      "`transactions` mais recentes do extrato ({ id, type, amount, balanceAfter, description, createdAt }). " +
+      "Use para uma visão mais rica que socialgo_balance (que é só saldo) — ex.: explicar depósitos/" +
+      "cobranças recentes. Restrito ao userId da chave de API.",
     {},
     async () => {
       try {
@@ -909,29 +931,24 @@ export async function registerTools(server: McpServer): Promise<void> {
   // Não credita saldo direto — devolve o pagamento a concluir no painel.
   server.tool(
     "socialgo_add_funds",
-    "RESELLER MODE (requires SOCIALGO_API_KEY + account). No account / no key? Do NOT add funds — use socialgo_guest_order to pay per order. " +
-      "Creates a PENDING payment to top up the current user's wallet and returns the payment to be completed " +
-      "in the panel ({ payment, status, amount, currency, method, message }). This does NOT add balance " +
-      "immediately — funds only land after the payment confirms. Use socialgo_guest_gateways to confirm which " +
-      "payment methods are currently active before choosing one. Scoped to the userId of the API key.",
+    "MODO REVENDEDOR (requer SOCIALGO_API_KEY + conta). Sem conta / sem chave? NÃO recarregue saldo — use socialgo_guest_order para pagar por pedido (caminho PRINCIPAL). " +
+      "Cria um pagamento PENDENTE para recarregar a carteira do usuário atual e devolve o pagamento a concluir " +
+      "no painel ({ payment, status, amount, currency, method, message }). NÃO credita saldo na hora — os " +
+      "fundos só entram após o pagamento confirmar. Use socialgo_guest_gateways para confirmar quais métodos " +
+      "de pagamento estão ativos agora antes de escolher um. Restrito ao userId da chave de API.",
     {
       amount: z
         .number()
         .positive()
-        .describe("Amount to add to the wallet, in the account currency."),
+        .describe("Valor a adicionar à carteira, na moeda da conta."),
       method: z
-        .enum([
-          "mercadopago",
-          "stripe",
-          "crypto",
-          "manual",
-          "paypal",
-          "paytm",
-          "cryptomus",
-          "cardinity",
-          "binance_pay",
-        ])
-        .describe("Payment gateway to use. Prefer one returned active by socialgo_guest_gateways."),
+        .string()
+        .min(1)
+        .describe(
+          "Nome do gateway de pagamento ATIVO (campo `gateway` de socialgo_guest_gateways / " +
+            "GET /gateways/active). NÃO é uma lista fixa — os gateways são dinâmicos; chame socialgo_guest_gateways " +
+            "para ver os ativos no momento e passe um deles.",
+        ),
     },
     async ({ amount, method }) => {
       try {
@@ -948,29 +965,29 @@ export async function registerTools(server: McpServer): Promise<void> {
   // `service|link|quantity` (uma linha por pedido), como o SDK serializa.
   server.tool(
     "socialgo_mass_order",
-    "RESELLER MODE (requires SOCIALGO_API_KEY + account balance). No account / no key? Do NOT use this — use socialgo_guest_order per order. " +
-      "Places SEVERAL orders in a single call. Pass `orders` as a list of { service, link, quantity }. " +
-      "Each line is independent — a failing line does NOT cancel the others. " +
-      "Returns { orders: [{ line, order }], errors: [{ line, reason }] }. " +
-      "Use socialgo_services first to resolve each `service` id. Charges are debited from the account balance. " +
-      "Scoped to the userId of the API key.",
+    "MODO REVENDEDOR (requer SOCIALGO_API_KEY + saldo na conta). Sem conta / sem chave? NÃO use isto — use socialgo_guest_order por pedido (caminho PRINCIPAL). " +
+      "Cria VÁRIOS pedidos numa única chamada. Passe `orders` como uma lista de { service, link, quantity }. " +
+      "Cada linha é independente — uma linha que falha NÃO cancela as outras. " +
+      "Retorna { orders: [{ line, order }], errors: [{ line, reason }] }. " +
+      "Use socialgo_services antes para resolver cada `service` id. As cobranças saem do saldo da conta. " +
+      "Restrito ao userId da chave de API.",
     {
       orders: z
         .array(
           z.object({
             service: z
               .union([z.number(), z.string()])
-              .describe("Service id (from socialgo_services)."),
-            link: z.string().min(1).describe("Target link (profile, post, video, etc)."),
+              .describe("Id do serviço (de socialgo_services)."),
+            link: z.string().min(1).describe("Link de destino (perfil, post, vídeo, etc)."),
             quantity: z
               .number()
               .int()
               .positive()
-              .describe("Desired quantity, within the service min/max."),
+              .describe("Quantidade desejada, dentro do min/max do serviço."),
           }),
         )
         .min(1)
-        .describe("List of orders to create in one batch."),
+        .describe("Lista de pedidos a criar num único lote."),
     },
     async ({ orders }) => {
       try {
@@ -988,28 +1005,28 @@ export async function registerTools(server: McpServer): Promise<void> {
   // Assinatura recorrente do PRÓPRIO usuário (action=subscription_create).
   server.tool(
     "socialgo_create_subscription",
-    "RESELLER MODE (requires SOCIALGO_API_KEY + account). No account / no key? Subscriptions need an account — not available in guest mode. " +
-      "Creates a RECURRING subscription for the current user (auto re-orders a service on a fixed cadence). " +
-      "Pass `service`, `link`, `quantity` per run, total `runs`, and `interval` in MINUTES between runs. " +
-      "Returns { subscription, status, runs, remaining_runs, interval, next_run }. " +
-      "Differs from drip-feed (a single fractioned order): a subscription is an ongoing schedule. " +
-      "Use socialgo_subscriptions to list existing ones. Scoped to the userId of the API key.",
+    "MODO REVENDEDOR (requer SOCIALGO_API_KEY + conta). Sem conta / sem chave? Assinaturas exigem conta — não existem no modo guest (compra avulsa via socialgo_guest_order). " +
+      "Cria uma assinatura RECORRENTE para o usuário atual (re-pede um serviço numa cadência fixa). " +
+      "Passe `service`, `link`, `quantity` por execução, total de `runs` e `interval` em MINUTOS entre execuções. " +
+      "Retorna { subscription, status, runs, remaining_runs, interval, next_run }. " +
+      "Difere de drip-feed (um único pedido fracionado): uma assinatura é um agendamento contínuo. " +
+      "Use socialgo_subscriptions para listar as existentes. Restrito ao userId da chave de API.",
     {
       service: z
         .union([z.number(), z.string()])
-        .describe("Service id (from socialgo_services)."),
-      link: z.string().min(1).describe("Target link (profile, post, video, etc)."),
+        .describe("Id do serviço (de socialgo_services)."),
+      link: z.string().min(1).describe("Link de destino (perfil, post, vídeo, etc)."),
       quantity: z
         .number()
         .int()
         .positive()
-        .describe("Quantity ordered on EACH run, within the service min/max."),
-      runs: z.number().int().positive().describe("Total number of recurring runs."),
+        .describe("Quantidade pedida em CADA execução, dentro do min/max do serviço."),
+      runs: z.number().int().positive().describe("Número total de execuções recorrentes."),
       interval: z
         .number()
         .int()
         .positive()
-        .describe("Interval in MINUTES between each run."),
+        .describe("Intervalo em MINUTOS entre cada execução."),
     },
     async ({ service, link, quantity, runs, interval }) => {
       try {
@@ -1023,11 +1040,11 @@ export async function registerTools(server: McpServer): Promise<void> {
   /* ───────────────────────── 16) socialgo_subscriptions ───────────────────── */
   server.tool(
     "socialgo_subscriptions",
-    "RESELLER MODE (requires SOCIALGO_API_KEY + account). " +
-      "Lists the current user's recurring subscriptions ({ subscription, service, link, status, quantity, " +
+    "MODO REVENDEDOR (requer SOCIALGO_API_KEY + conta). " +
+      "Lista as assinaturas recorrentes do usuário atual ({ subscription, service, link, status, quantity, " +
       "runs, remaining_runs, interval, next_run, created_at }). " +
-      "Use to review active/finished subscriptions created via socialgo_create_subscription. " +
-      "Scoped to the userId of the API key.",
+      "Use para revisar assinaturas ativas/encerradas criadas via socialgo_create_subscription. " +
+      "Restrito ao userId da chave de API.",
     {},
     async () => {
       try {
@@ -1042,13 +1059,13 @@ export async function registerTools(server: McpServer): Promise<void> {
   // Apenas valida/preview — NÃO resgata o cupom (action=coupon_validate).
   server.tool(
     "socialgo_validate_coupon",
-    "RESELLER MODE (requires SOCIALGO_API_KEY + account). Coupons apply to account balance, not guest checkout. " +
-      "Validates / previews a coupon code WITHOUT redeeming it. " +
-      "Returns { valid, reason?, code?, kind?, value?, minAmount?, expiresAt? } — `kind` is 'deposit_bonus' " +
-      "(percentage) or 'wallet_credit' (fixed credit). When `valid` is false, `reason` explains why. " +
-      "This is read-only: it never applies the coupon, only checks it.",
+    "MODO REVENDEDOR (requer SOCIALGO_API_KEY + conta). Cupons valem para o saldo da conta, não para o guest checkout. " +
+      "Valida / faz preview de um código de cupom SEM resgatá-lo. " +
+      "Retorna { valid, reason?, code?, kind?, value?, minAmount?, expiresAt? } — `kind` é 'deposit_bonus' " +
+      "(percentual) ou 'wallet_credit' (crédito fixo). Quando `valid` é false, `reason` explica o porquê. " +
+      "É somente-leitura: nunca aplica o cupom, só verifica.",
     {
-      code: z.string().min(1).describe("Coupon code to validate (case-insensitive)."),
+      code: z.string().min(1).describe("Código do cupom a validar (não diferencia maiúsculas/minúsculas)."),
     },
     async ({ code }) => {
       try {
@@ -1062,11 +1079,11 @@ export async function registerTools(server: McpServer): Promise<void> {
   /* ───────────────────────── 18) socialgo_affiliate_stats ─────────────────── */
   server.tool(
     "socialgo_affiliate_stats",
-    "RESELLER MODE (requires SOCIALGO_API_KEY + account). " +
-      "Returns the current user's OWN affiliate stats and referral link: { referral_code, referral_link, " +
+    "MODO REVENDEDOR (requer SOCIALGO_API_KEY + conta). " +
+      "Retorna as estatísticas de afiliado e o link de indicação do PRÓPRIO usuário: { referral_code, referral_link, " +
       "affiliate_balance, enabled, commission_percent, level2_percent, minimum_payout, referrals_count, " +
       "level2_count, total_earned, earned_l1, earned_l2 }. " +
-      "Scoped to the userId of the API key — never exposes other users' data.",
+      "Restrito ao userId da chave de API — nunca expõe dados de outros usuários.",
     {},
     async () => {
       try {
@@ -1080,10 +1097,10 @@ export async function registerTools(server: McpServer): Promise<void> {
   /* ───────────────────────── 19) socialgo_loyalty_status ──────────────────── */
   server.tool(
     "socialgo_loyalty_status",
-    "RESELLER MODE (requires SOCIALGO_API_KEY + account). " +
-      "Returns the current user's loyalty status: { tier, label, next_threshold, progress_pct, points_balance, " +
-      "lifetime_spent, currency }. Use to tell the user their tier and how close they are to the next one. " +
-      "Scoped to the userId of the API key.",
+    "MODO REVENDEDOR (requer SOCIALGO_API_KEY + conta). " +
+      "Retorna o status de fidelidade do usuário atual: { tier, label, next_threshold, progress_pct, points_balance, " +
+      "lifetime_spent, currency }. Use para dizer ao usuário seu tier e o quão perto está do próximo. " +
+      "Restrito ao userId da chave de API.",
     {},
     async () => {
       try {
@@ -1098,27 +1115,27 @@ export async function registerTools(server: McpServer): Promise<void> {
   // Recomendações por serviço-âncora e/ou plataforma (action=recommend).
   server.tool(
     "socialgo_recommend",
-    "RESELLER MODE (requires SOCIALGO_API_KEY). No account / no key? Use socialgo_guest_services to browse instead. " +
-      "Recommends related services given an anchor `service` id and/or a `platform`. " +
-      "Returns a ranked list of { service, name, category, platform, rate, min, max, refill, reason } where " +
-      "`reason` is 'bought_together' | 'same_platform' | 'popular'. " +
-      "Use to suggest cross-sells/next steps after a user shows interest in a service or platform.",
+    "MODO REVENDEDOR (requer SOCIALGO_API_KEY). Sem conta / sem chave? Use socialgo_guest_services para navegar o catálogo. " +
+      "Recomenda serviços relacionados a partir de um `service` âncora e/ou uma `platform`. " +
+      "Retorna uma lista ranqueada de { service, name, category, platform, rate, min, max, refill, reason } onde " +
+      "`reason` é 'bought_together' | 'same_platform' | 'popular'. " +
+      "Use para sugerir cross-sells/próximos passos depois que o usuário demonstra interesse num serviço ou plataforma.",
     {
       service: z
         .union([z.number(), z.string()])
         .optional()
-        .describe("Anchor service id to recommend around (from socialgo_services)."),
+        .describe("Id do serviço âncora para recomendar a partir dele (de socialgo_services)."),
       platform: z
         .string()
         .optional()
-        .describe("Platform to recommend for, e.g. 'Instagram', 'TikTok', 'YouTube'."),
+        .describe("Plataforma para recomendar, ex.: 'Instagram', 'TikTok', 'YouTube'."),
       limit: z
         .number()
         .int()
         .min(1)
         .max(50)
         .optional()
-        .describe("Max recommendations to return (1-50)."),
+        .describe("Máximo de recomendações a retornar (1-50)."),
     },
     async ({ service, platform, limit }) => {
       try {
@@ -1133,39 +1150,39 @@ export async function registerTools(server: McpServer): Promise<void> {
   // Devolve um PLANO de campanha — NÃO cria pedido sozinho (action=campaign_build).
   server.tool(
     "socialgo_build_campaign",
-    "RESELLER MODE (requires SOCIALGO_API_KEY + account). Planning only; executing the plan needs an account. " +
-      "Builds a campaign PLAN from a budget, a goal and a delivery window — it does NOT place any order, it only " +
-      "returns the proposed plan for review. " +
-      "Provide `budget` and `days`, plus a target via `service` id OR `platform` (+ optional `boost_type`) and " +
-      "optional `link`. Returns { feasible, reason?, service?, totalQuantity?, totalCost?, runs?, " +
-      "intervalMinutes?, schedule?, params }. After reviewing, the user can execute it via socialgo_place_order " +
-      "(drip-feed using runs+interval) or socialgo_create_subscription.",
+    "MODO REVENDEDOR (requer SOCIALGO_API_KEY + conta). Só planejamento; executar o plano exige conta. " +
+      "Monta um PLANO de campanha a partir de um orçamento, um objetivo e uma janela de entrega — NÃO cria " +
+      "nenhum pedido, só retorna o plano proposto para revisão. " +
+      "Informe `budget` e `days`, mais um alvo via `service` id OU `platform` (+ `boost_type` opcional) e " +
+      "`link` opcional. Retorna { feasible, reason?, service?, totalQuantity?, totalCost?, runs?, " +
+      "intervalMinutes?, schedule?, params }. Após revisar, o usuário pode executá-lo via socialgo_place_order " +
+      "(drip-feed usando runs+interval) ou socialgo_create_subscription.",
     {
       budget: z
         .number()
         .positive()
-        .describe("Total budget for the campaign, in the account currency."),
+        .describe("Orçamento total da campanha, na moeda da conta."),
       days: z
         .number()
         .int()
         .positive()
-        .describe("Delivery window in DAYS for gradual rollout."),
+        .describe("Janela de entrega em DIAS para distribuição gradual."),
       service: z
         .union([z.number(), z.string()])
         .optional()
-        .describe("Target service id (from socialgo_services). Provide this OR `platform`."),
+        .describe("Id do serviço alvo (de socialgo_services). Informe este OU `platform`."),
       platform: z
         .string()
         .optional()
-        .describe("Target platform, e.g. 'Instagram', 'TikTok'. Used when no `service` id is given."),
+        .describe("Plataforma alvo, ex.: 'Instagram', 'TikTok'. Usada quando nenhum `service` id é dado."),
       boost_type: z
         .string()
         .optional()
-        .describe("Optional boost type to bias service selection, e.g. 'followers', 'likes', 'views'."),
+        .describe("Tipo de impulso opcional para enviesar a escolha do serviço, ex.: 'followers', 'likes', 'views'."),
       link: z
         .string()
         .optional()
-        .describe("Optional target link (profile/post/video) the plan should boost."),
+        .describe("Link de destino opcional (perfil/post/vídeo) que o plano deve impulsionar."),
     },
     async ({ budget, days, service, platform, boost_type, link }) => {
       try {
@@ -1180,14 +1197,14 @@ export async function registerTools(server: McpServer): Promise<void> {
   // Resolve uma loja pública pelo slug → pacotes (action=storefront).
   server.tool(
     "socialgo_storefront",
-    "RESELLER MODE (requires SOCIALGO_API_KEY). Although the storefront content is public, this tool reads it " +
-      "through the reseller API and needs a key. No account / no key? Use socialgo_guest_services + socialgo_guest_order. " +
-      "Resolves a public storefront by its `slug` and returns the store with its packages: " +
+    "MODO REVENDEDOR (requer SOCIALGO_API_KEY). Embora o conteúdo da loja seja público, esta tool o lê " +
+      "através da API de revendedor e precisa de chave. Sem conta / sem chave? Use socialgo_guest_services + socialgo_guest_order. " +
+      "Resolve uma loja pública pelo seu `slug` e retorna a loja com seus pacotes: " +
       "{ slug, title, description, theme, locale, packages: [{ id, title, description, quantity, price, " +
-      "serviceName }] }. The displayed package `price` is a reference — the charged amount is recomputed " +
-      "server-side. Use to show a public store's offered packages to a user.",
+      "serviceName }] }. O `price` exibido do pacote é uma referência — o valor cobrado é recalculado " +
+      "no servidor. Use para mostrar os pacotes oferecidos por uma loja pública a um usuário.",
     {
-      slug: z.string().min(1).describe("Public storefront slug to resolve."),
+      slug: z.string().min(1).describe("Slug da loja pública a resolver."),
     },
     async ({ slug }) => {
       try {

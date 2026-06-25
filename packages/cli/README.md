@@ -3,7 +3,7 @@
 [![npm version](https://img.shields.io/npm/v/@socialgo/cli.svg)](https://www.npmjs.com/package/@socialgo/cli)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](../../LICENSE)
 
-The official command-line client for **SocialGO** — browse services, place and track orders, request refills and cancellations, and manage your wallet, all from your terminal. It can also place **guest** orders with no account at all.
+The official command-line client for **SocialGO**. The **main path is guest** — anyone can browse services and **buy with no account, no signup, and no API key** (`guest-*` commands, pay-per-order). An account + API key is **optional**, for **better tracking**: order history, wallet, refills, subscriptions (the reseller commands).
 
 The binary is named `socialgo`.
 
@@ -61,14 +61,18 @@ Configure via environment variables (or the global `--api-url` / `--key` flags):
 | Variable           | Required | Default                    | Description                                                  |
 | ------------------ | -------- | -------------------------- | ------------------------------------------------------------ |
 | `SOCIALGO_API_URL` | No       | `https://api.usesocialgo.com` | Base URL of your panel/API.                                  |
-| `SOCIALGO_API_KEY` | Yes\*    | —                          | Your API key, from your panel under **/dashboard/api-key**.  |
+| `SOCIALGO_API_KEY` | Optional\* | —                        | Your API key, from your panel under **/dashboard/api-key**.  |
 
-\* Required for all reseller commands. The **guest** commands work without a key.
+\* **Not needed to buy.** The **guest** commands work with no key and no account. The key is only required for the reseller commands (order history, wallet, refills) — i.e. optional, for better tracking.
 
 ```bash
+# No key needed — buy as a guest right away:
+socialgo config                 # shows you can buy without an account
+socialgo guest-services --platform instagram --q followers
+
+# Optional — only if you have an account and want tracking (history/wallet/refill):
 export SOCIALGO_API_KEY="your-key"
 export SOCIALGO_API_URL="https://your-panel.com"   # optional
-
 socialgo config   # verify your setup
 ```
 
@@ -107,27 +111,39 @@ Full reference, flags, and example outputs: [`docs/cli.md`](https://github.com/S
 
 > Examples below use `socialgo <command>`. If you haven't linked the binary (`npm link`), substitute your run method — e.g. `node packages/cli/dist/index.js <command>`.
 
+### Buy without an account (guest) — the main path
+
+No key, no signup. The `serviceId` is a UUID printed by `guest-services`; the
+order id and guest token are returned by `guest-order` — copy the real values
+from your own output (the ones below are placeholders).
+
 ```bash
-# Configure and check
+# 1. Find a service (prints its UUID under the ID column):
+socialgo guest-services --platform instagram --q followers
+# 2. See which payment methods are active:
+socialgo guest-gateways
+# 3. Place the order (email is just a contact for receipt/tracking — not an account):
+socialgo guest-order <serviceId-uuid> --email you@example.com \
+  --link https://instagram.com/profile --quantity 500
+# 4. Open the returned payment URL, then track it with the returned ids:
+socialgo guest-status <orderId-uuid> --token <guestToken>
+```
+
+### Optional: account mode (better tracking)
+
+Only if you have an account and want history/wallet/refills:
+
+```bash
 export SOCIALGO_API_KEY="your-key"
 socialgo config
 socialgo balance
 
-# Find a service and place an order
+# Find a service and place an order from your balance
 socialgo services search "instagram followers"
 socialgo order add --service 1234 --link https://insta.com/p/abc --quantity 1000
 
 # Track it
 socialgo order status 98765
-```
-
-### Buy without an account (guest)
-
-```bash
-socialgo guest-services --platform instagram --q followers
-socialgo guest-order ig01 --email you@example.com --link https://instagram.com/profile --quantity 500
-# open the returned payment URL, then:
-socialgo guest-status gord_abc123 --token gtok_xyz789
 ```
 
 ### Scripting

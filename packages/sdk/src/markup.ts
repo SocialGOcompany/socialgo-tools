@@ -1,4 +1,17 @@
-/** Regras de markup: preço do fornecedor (por 1000) → preço de venda. */
+/**
+ * Regras de markup: preço do fornecedor (por 1000) → preço de venda.
+ *
+ * ⚠️ MÓDULO MONEY-CRITICAL — GATE DE SUB-REVENDA.
+ * Estes helpers (applyMarkup/orderCost/resolveMarkup) alimentam a precificação
+ * de SUB-REVENDA. Hoje são exportados publicamente mas NÃO têm consumidor dentro
+ * do repo (nenhum uso em cli/mcp/smm-v2). O contrato matemático está travado por
+ * testes em `markup.test.ts` (rode `pnpm test` no pacote sdk). NÃO ligue a
+ * sub-revenda em produção sem antes:
+ *   1) fazer o wire-up explícito (cli/mcp chamando estes helpers); e
+ *   2) revalidar os testes contra a cascata real do painel.
+ * applyMarkup arredonda meio-pra-cima (Math.round) em centavos — em reprecificação
+ * em massa de milhares de serviços, confira drift de centavos antes de aplicar.
+ */
 
 export interface MarkupRule {
   /** multiplicador global (ex.: 1.5 = +50%) */

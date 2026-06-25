@@ -55,9 +55,14 @@ An SMM panel exposes thousands of services and a verbose, form-encoded HTTP prot
 
 SocialGO Tools removes that friction. The same typed core speaks the standard **SMM API v2** protocol (`POST {SOCIALGO_API_URL}/api/v2`) and gives you three ways to drive your panel:
 
-- **Talk to it.** Add the MCP server to Claude and order in plain English. No service IDs to memorize, no forms.
-- **Script it.** The `socialgo` CLI runs the full reseller flow from your terminal or a cron job.
+- **Talk to it.** Add the MCP server to Claude and order in plain English — **no account, no API key needed to buy**. No service IDs to memorize, no forms.
+- **Script it.** The `socialgo` CLI buys as a guest (no key) and, optionally, runs the full reseller flow from your terminal or a cron job.
 - **Build on it.** The TypeScript SDK ships typed models plus dependency-free pricing/markup helpers for resellers.
+
+> **Buying is guest-first.** Anyone can browse and buy with no account and no API
+> key (pay-per-order; an email is just a receipt/tracking contact, not a signup).
+> An account + API key is **optional** — add it only for better tracking (order
+> history, wallet, refills, subscriptions).
 
 MCP (the Model Context Protocol) is the new standard that lets AI assistants call real tools. Legacy SMM panels are PHP click-UIs with no AI surface at all. As far as we know, this is the first MCP server and CLI built for an SMM platform.
 
@@ -81,9 +86,9 @@ Beyond find-and-order, the assistant can now plan and grow: `socialgo_recommend`
 
 ## Use it from Claude (30-second setup)
 
-This is the part that changes how you work. Add the SMM MCP server once, then just ask.
+This is the part that changes how you work. Add the SMM MCP server once, then just ask. **No API key is required** — buying is guest-first.
 
-**Claude Desktop** — add this to your `claude_desktop_config.json` and restart Claude:
+**Claude Desktop** — add this to your `claude_desktop_config.json` and restart Claude. Only the panel URL is needed:
 
 ```json
 {
@@ -92,36 +97,34 @@ This is the part that changes how you work. Add the SMM MCP server once, then ju
       "command": "npx",
       "args": ["-y", "@socialgo/mcp"],
       "env": {
-        "SOCIALGO_API_URL": "https://api.usesocialgo.com",
-        "SOCIALGO_API_KEY": "YOUR_API_KEY"
+        "SOCIALGO_API_URL": "https://api.usesocialgo.com"
       }
     }
   }
 }
 ```
 
-**Claude Code** — one command:
+**Claude Code** — one command, no key:
 
 ```bash
 claude mcp add socialgo \
   --env SOCIALGO_API_URL=https://api.usesocialgo.com \
-  --env SOCIALGO_API_KEY=YOUR_API_KEY \
   -- npx -y @socialgo/mcp
 ```
 
-The same `npx -y @socialgo/mcp` command works in **Cursor, Cline, Windsurf, and VS Code** — point each client's MCP config at it with the two env vars above.
+The same `npx -y @socialgo/mcp` command works in **Cursor, Cline, Windsurf, and VS Code** — point each client's MCP config at it with `SOCIALGO_API_URL`.
 
 Now ask in natural language:
 
 > "Find cheap Instagram followers and order 1,000 for instagram.com/mypage."
 
-Here's what happens under the hood:
+Here's what happens under the hood — the **default, keyless path is guest checkout**:
 
-1. Claude calls `socialgo_services` with your intent and gets back the matching services (IDs, rates per 1,000, min/max).
-2. It calls `socialgo_place_order` with the service ID, your link, and the quantity.
-3. It reports the order ID back to you, and can follow up with `socialgo_order_status`, `socialgo_refill`, or `socialgo_cancel` on request.
+1. Claude calls `socialgo_guest_services` with your intent and gets back the matching services (IDs, rates per 1,000, min/max). No account, no key.
+2. It calls `socialgo_guest_order` with the service ID, your link, the quantity, and a contact email — and hands you back a payment URL plus a tracking token.
+3. You pay at the link; the order ships only after payment confirms. Claude tracks it with `socialgo_guest_order_status` (by token or email).
 
-Want to buy without an account? Claude can use the guest tools (`socialgo_guest_gateways`, `socialgo_guest_order`, `socialgo_guest_order_status`) to create a pay-per-order checkout link and track it by token. See [Guest checkout](#guest-checkout-buy-with-no-account).
+> **Optional — only for ongoing tracking.** If you already have a SocialGO account and want order history, a wallet, refills, or subscriptions, add your API key as a second env var (`SOCIALGO_API_KEY=YOUR_API_KEY`) alongside `SOCIALGO_API_URL`. That unlocks the reseller tools (`socialgo_services`, `socialgo_place_order`, `socialgo_order_status`, …). **Buying never requires it** — without a key, Claude just uses the guest tools above.
 
 > Building from source instead of npm? Swap `npx -y @socialgo/mcp` for `node /absolute/path/to/socialgo-tools/packages/mcp/dist/index.js`. See [Installation](#installation).
 
@@ -222,28 +225,35 @@ See [Use it from Claude](#use-it-from-claude-30-second-setup) above for the copy
 
 ## Quickstart — CLI (terminal)
 
+Buying is guest-first — **no account and no API key**. Only the panel URL is needed:
+
 ```bash
 npm i -g @socialgo/cli
 
-export SOCIALGO_API_URL="https://api.usesocialgo.com"
-export SOCIALGO_API_KEY="YOUR_API_KEY"
+export SOCIALGO_API_URL="https://api.usesocialgo.com"   # no key needed to buy
 
-socialgo config                              # confirm URL + key
-socialgo balance                             # check your wallet
-
-# find a service, inspect it, order against a link, then track it
-socialgo services search "instagram followers"
-socialgo service 1234
-socialgo order add --service 1234 --link https://instagram.com/yourpage --quantity 1000
-socialgo order status 98765
+# guest checkout: find a service, order it, track it — no account
+socialgo guest-services --platform instagram --q "followers"
+socialgo guest-order <serviceId-uuid> \
+  --email you@example.com \
+  --link https://instagram.com/yourpage \
+  --quantity 1000
+socialgo guest-status <ORDER_ID> --token <GUEST_TOKEN>
 ```
 
-Drip-feed and per-type orders work too:
+The email is only a contact for the receipt and tracking — it is not a signup and creates no account. See [Guest checkout](#guest-checkout-buy-with-no-account).
 
-```bash
-socialgo order add --service 70 --link <url> --runs 10 --interval 30        # drip-feed
-socialgo order add --service 55 --link <url> --comments ./comments.txt      # custom comments
-```
+> **Optional — reseller mode (account + API key).** If you have an account and want order history, a wallet, refills and subscriptions, set `SOCIALGO_API_KEY` too and the full reseller flow opens up:
+>
+> ```bash
+> export SOCIALGO_API_KEY="YOUR_API_KEY"   # optional — only for account/tracking
+> socialgo balance                              # check your wallet
+> socialgo services search "instagram followers"
+> socialgo order add --service 1234 --link https://instagram.com/yourpage --quantity 1000
+> socialgo order status 98765
+> socialgo order add --service 70 --link <url> --runs 10 --interval 30        # drip-feed
+> socialgo order add --service 55 --link <url> --comments ./comments.txt      # custom comments
+> ```
 
 > Building from source? The same commands run via `node packages/cli/dist/index.js <command>`.
 
@@ -279,17 +289,19 @@ The client also exposes `multiStatus`, `refill`, `cancel` and `balance`, plus th
 
 ## Guest checkout: buy with no account
 
-No account, no API key, no wallet. Guest mode is pay-per-order: provide an email, pay once at checkout.
+This is the **main way to buy**: no account, no API key, no wallet. Guest mode is
+pay-per-order and you pay once at checkout. The email is only a **contact** for the
+receipt and tracking — it is not a signup and creates no account.
 
 ```bash
 # 1. List the active payment gateways (use a name as --method)
 socialgo guest-gateways
 
-# 2. Browse the public catalog and grab a service id
+# 2. Browse the public catalog and grab a service id (a UUID, in the ID column)
 socialgo guest-services --platform instagram --q "followers"
 
-# 3. Create the order — returns a payment URL
-socialgo guest-order 1234 \
+# 3. Create the order — returns a payment URL. <serviceId> is the UUID from step 2.
+socialgo guest-order <serviceId-uuid> \
   --email you@example.com \
   --link https://instagram.com/yourpage \
   --quantity 1000 \
@@ -332,12 +344,19 @@ Every tool reads the same two environment variables. Secrets always come from th
 
 | Variable | Required | What it is |
 | --- | --- | --- |
-| `SOCIALGO_API_URL` | yes | Base URL of your SocialGO panel, e.g. `https://api.usesocialgo.com`. The SMM v2 endpoint is `{SOCIALGO_API_URL}/api/v2`. |
-| `SOCIALGO_API_KEY` | account mode | Your API key, found in the panel under **Account › API**. Not needed for [guest mode](#guest-checkout-buy-with-no-account). |
+| `SOCIALGO_API_URL` | **Yes** | Base URL of your SocialGO panel, e.g. `https://api.usesocialgo.com`. The SMM v2 endpoint is `{SOCIALGO_API_URL}/api/v2`. |
+| `SOCIALGO_API_KEY` | **No — optional** | **Buying never needs it.** Only for account/tracking mode (order history, wallet, refills, subscriptions). Your API key lives in the panel under **Account › API**. Leave it unset to buy as a guest. |
+
+To buy, you only ever need the panel URL:
 
 ```bash
-export SOCIALGO_API_URL="https://api.usesocialgo.com"
-export SOCIALGO_API_KEY="YOUR_API_KEY"
+export SOCIALGO_API_URL="https://api.usesocialgo.com"   # all you need to buy (guest)
+```
+
+Add the key **only** if you want account/tracking mode — it is never required to place an order:
+
+```bash
+export SOCIALGO_API_KEY="YOUR_API_KEY"   # optional — account mode only, not for buying
 ```
 
 The CLI also accepts `--api-url` and `--key` to override per command.

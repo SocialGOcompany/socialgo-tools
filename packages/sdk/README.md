@@ -94,6 +94,49 @@ try {
 }
 ```
 
+## Guest checkout (no account, no key)
+
+This SDK speaks the **reseller** SMM v2 protocol, so its methods take an API key.
+But **buying does not require an account or a key** — the panel exposes public
+`/guest/*` REST endpoints for pay-per-order, and they are the **main path** for
+anyone without an account (an email is just a receipt/tracking contact, not a
+signup). The reseller account + key is **optional**, for better tracking
+(history, wallet, refills).
+
+For guest flows, call the public endpoints directly with `fetch` (no key, no
+`SmmV2Client`):
+
+```ts
+const base = process.env.SOCIALGO_API_URL?.replace(/\/+$/, "");
+
+// 1. Browse the public catalog → pick a service `id` (a UUID).
+const { items } = await fetch(`${base}/guest/services?platform=instagram&q=followers`).then((r) => r.json());
+
+// 2. List active gateways → use a `gateway` value as `method`.
+const { gateways } = await fetch(`${base}/gateways/active`).then((r) => r.json());
+
+// 3. Create the order → returns a payment URL (no key sent).
+const order = await fetch(`${base}/guest/order`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    email: "buyer@example.com",         // contact only — not an account
+    serviceId: items[0].id,             // UUID from step 1
+    link: "https://instagram.com/yourpage",
+    quantity: 1000,
+    method: gateways[0].gateway,
+  }),
+}).then((r) => r.json());
+// → { orderId, guestToken, url, amount, currency } — hand `url` to the buyer.
+
+// 4. Track it (ownership proven by token or email).
+const status = await fetch(`${base}/guest/order/${order.orderId}?token=${order.guestToken}`).then((r) => r.json());
+```
+
+The [`@socialgo/cli`](https://github.com/SocialGOcompany/socialgo-tools/tree/main/packages/cli)
+(`guest-*` commands) and [`@socialgo/mcp`](https://github.com/SocialGOcompany/socialgo-tools/tree/main/packages/mcp)
+(`socialgo_guest_*` tools) wrap exactly these endpoints if you'd rather not call them by hand.
+
 ## API at a glance
 
 ### `SmmV2Client`
