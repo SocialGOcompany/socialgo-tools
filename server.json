@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.schema.json",
+  "name": "io.github.socialgocompany/socialgo",
+  "description": "The first MCP server for a Social Media Marketing (SMM) panel — let AI assistants search services and place SMM orders (Instagram, TikTok, YouTube followers, likes, views), including keyless guest checkout (buy without an account or API key).",
+  "repository": {
+    "url": "https://github.com/SocialGOcompany/socialgo-tools",
+    "source": "github"
+  },
+  "version": "0.3.0",
+  "websiteUrl": "https://usesocialgo.com",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@socialgo/mcp",
+      "version": "0.3.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "SOCIALGO_API_KEY",
+          "description": "API key for account / reseller operations (balance, order history). Optional — guest checkout and catalog browsing work with no key.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "SOCIALGO_TOKEN",
+          "description": "User bearer token (alias SOCIALGO_USER_TOKEN) for authenticated actions. Optional.",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "SOCIALGO_API_URL",
+          "description": "Override the SMM API v2 base URL. Defaults to the SocialGO public API.",
+          "isRequired": false,
+          "isSecret": false
+        }
+      ]
+    }
+  ]
+}
